@@ -1,79 +1,65 @@
 name: Ücretsiz iOS IPA Derleme (Unsigned - Sideloadly / AltStore)
 
 on:
-  workflow_dispatch:
   push:
-    branches:
-      - main
-      - master
+    branches: [ main, master ]
+  workflow_dispatch:
 
 jobs:
-  build-unsigned-ipa:
+  build-ios:
     name: Build Unsigned iOS (.ipa)
     runs-on: macos-latest
-    timeout-minutes: 60
 
     steps:
       - name: Repo dosyalarını çek
         uses: actions/checkout@v4
 
-      - name: En güncel Xcode sürümünü seç
-        run: |
-          LATEST_XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)
-          echo "Seçilen Xcode: $LATEST_XCODE"
-          sudo xcode-select -s "$LATEST_XCODE/Contents/Developer"
-          xcodebuild -version
-
       - name: Node.js kurulumu
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: 'npm'
+          node-version: 20
 
       - name: Bağımlılıkları yükle
-        run: npm install
+        run: npm install --legacy-peer-deps
 
       - name: Native iOS (Xcode) projesini oluştur (Expo Prebuild)
-        env:
-          CI: "1"
-        run: npx expo prebuild --platform ios --clean
+        run: npx expo prebuild --platform ios --no-install
 
       - name: CocoaPods bağımlılıklarını yükle
         working-directory: ios
         run: pod install
 
       - name: İmzasız (Unsigned) iOS Uygulamasını Derle
+        working-directory: ios
         run: |
-          WORKSPACE=$(ls -d ios/*.xcworkspace | head -n 1)
-          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list -json | python3 -c "import sys, json; data=json.load(sys.stdin); schemes=[s for s in data['workspace']['schemes'] if not s.startswith('Pods')]; print(schemes[0])")
-          echo "Using Workspace: $WORKSPACE | Scheme: $SCHEME"
-
-          xcodebuild \
-            -workspace "$WORKSPACE" \
+          WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
+          echo "Derlenen Workspace: $WORKSPACE | Scheme: $SCHEME"
+          xcodebuild -workspace "$WORKSPACE" \
             -scheme "$SCHEME" \
             -configuration Release \
             -sdk iphoneos \
-            -derivedDataPath build/DerivedData \
-            CODE_SIGNING_ALLOWED=NO \
-            CODE_SIGNING_REQUIRED=NO \
+            -derivedDataPath build \
             CODE_SIGN_IDENTITY="" \
-            DEVELOPMENT_TEAM="" \
-            COMPILER_INDEX_STORE_ENABLE=NO \
-            build
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGNING_ALLOWED=NO \
+             clean build
 
       - name: .app çıktısını .ipa dosyasına dönüştür
         run: |
-          mkdir -p build/Payload
-          APP_PATH=$(find build/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
+          mkdir -p build_ipa/Payload
+          APP_PATH=$(find ios/build -name "*.app" -type d | head -n 1)
           echo "Found app bundle: $APP_PATH"
-          cp -R "$APP_PATH" build/Payload/
-          cd build
-          zip -r -q GunlukPlan.ipa Payload
+          if [ -z "$APP_PATH" ]; then
+            echo "HATA: .app dosyası bulunamadı!"
+            exit 1
+          fi
+          cp -r "$APP_PATH" build_ipa/Payload/
+          cd build_ipa
+          zip -r -q ../unsigned-app.ipa Payload
 
       - name: IPA Dosyasını İndirilebilir Artifact Olarak Yükle
         uses: actions/upload-artifact@v4
         with:
-          name: GunlukPlan-IPA
-          path: build/GunlukPlan.ipa
-          if-no-files-found: error
-          retention-days: 30
+          name: Unsigned-iOS-IPA
+          path: unsigned-app.ipa
