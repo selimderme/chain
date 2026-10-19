@@ -1,0 +1,79 @@
+name: Ücretsiz iOS IPA Derleme (Unsigned - Sideloadly / AltStore)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build-unsigned-ipa:
+    name: Build Unsigned iOS (.ipa)
+    runs-on: macos-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Repo dosyalarını çek
+        uses: actions/checkout@v4
+
+      - name: En güncel Xcode sürümünü seç
+        run: |
+          LATEST_XCODE=$(ls -d /Applications/Xcode*.app | sort -V | tail -n 1)
+          echo "Seçilen Xcode: $LATEST_XCODE"
+          sudo xcode-select -s "$LATEST_XCODE/Contents/Developer"
+          xcodebuild -version
+
+      - name: Node.js kurulumu
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'npm'
+
+      - name: Bağımlılıkları yükle
+        run: npm install
+
+      - name: Native iOS (Xcode) projesini oluştur (Expo Prebuild)
+        env:
+          CI: "1"
+        run: npx expo prebuild --platform ios --clean
+
+      - name: CocoaPods bağımlılıklarını yükle
+        working-directory: ios
+        run: pod install
+
+      - name: İmzasız (Unsigned) iOS Uygulamasını Derle
+        run: |
+          WORKSPACE=$(ls -d ios/*.xcworkspace | head -n 1)
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list -json | python3 -c "import sys, json; data=json.load(sys.stdin); schemes=[s for s in data['workspace']['schemes'] if not s.startswith('Pods')]; print(schemes[0])")
+          echo "Using Workspace: $WORKSPACE | Scheme: $SCHEME"
+
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build
+
+      - name: .app çıktısını .ipa dosyasına dönüştür
+        run: |
+          mkdir -p build/Payload
+          APP_PATH=$(find build/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
+          echo "Found app bundle: $APP_PATH"
+          cp -R "$APP_PATH" build/Payload/
+          cd build
+          zip -r -q GunlukPlan.ipa Payload
+
+      - name: IPA Dosyasını İndirilebilir Artifact Olarak Yükle
+        uses: actions/upload-artifact@v4
+        with:
+          name: GunlukPlan-IPA
+          path: build/GunlukPlan.ipa
+          if-no-files-found: error
+          retention-days: 30
