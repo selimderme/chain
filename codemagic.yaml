@@ -1,0 +1,45 @@
+workflows:
+  ios-unsigned-ipa:
+    name: Günlük Plan — Ücretsiz İmzasız iOS IPA (Sideloadly / AltStore)
+    max_build_duration: 60
+    instance_type: mac_mini_m2
+    environment:
+      vars:
+        BUNDLE_ID: "com.selim.gunlukplan"
+      node: 22
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Bağımlılıkları yükle
+        script: |
+          npm install
+      - name: Expo Prebuild (Native iOS Xcode projesini üret)
+        script: |
+          CI=1 npx expo prebuild --platform ios --clean
+      - name: CocoaPods kurulumu
+        script: |
+          cd ios && pod install
+      - name: İmzasız IPA paketini derle
+        script: |
+          WORKSPACE=$(ls -d ios/*.xcworkspace | head -n 1)
+          SCHEME=$(xcodebuild -workspace "$WORKSPACE" -list -json | python3 -c "import sys, json; data=json.load(sys.stdin); schemes=[s for s in data['workspace']['schemes'] if not s.startswith('Pods')]; print(schemes[0])")
+          xcodebuild \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            DEVELOPMENT_TEAM="" \
+            COMPILER_INDEX_STORE_ENABLE=NO \
+            build
+          mkdir -p build/Payload
+          APP_PATH=$(find build/DerivedData/Build/Products/Release-iphoneos -maxdepth 1 -name "*.app" | head -n 1)
+          cp -R "$APP_PATH" build/Payload/
+          cd build
+          zip -r -q GunlukPlan-unsigned.ipa Payload
+    artifacts:
+      - build/GunlukPlan-unsigned.ipa
+      - /tmp/xcodebuild_logs/*.log

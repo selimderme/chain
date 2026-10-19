@@ -1,0 +1,30 @@
+{
+  "expo": {
+    "name": "Günlük Plan",
+    "slug": "gunluk-plan",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "automatic",
+    "newArchEnabled": true,
+    "splash": {
+      "image": "./assets/splash.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#fff4e6"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.selim.gunlukplan",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    },
+    "android": {
+      "package": "com.selim.gunlukplan",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#fff4e6"
+      }
+    }
+  }
+}

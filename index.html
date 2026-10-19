@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Günlük Plan</title>
+  <meta name="theme-color" content="#fff4e6">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body data-tab="beslenme">
+  <header class="topbar">
+    <h1 class="app-title">Günlük Plan</h1>
+    <nav class="tabs" role="tablist" aria-label="Kategoriler" id="tabs"></nav>
+  </header>
+
+  <main id="panel" class="panel" role="tabpanel" aria-live="polite"></main>
+
+  <footer class="foot">
+    <p class="legend">
+      <span><i class="dot g"></i> Dokun: yeşil işaretle / kaldır</span>
+      <span><i class="dot b"></i> Basılı tut (veya sağ tık): renk seç</span>
+    </p>
+    <p class="backup">
+      <button type="button" id="exportBtn" class="link-btn">Yedekle</button> ·
+      <button type="button" id="importBtn" class="link-btn">Geri yükle</button>
+      <input type="file" id="importFile" accept="application/json" hidden>
+    </p>
+  </footer>
+
+  <!-- Basılı tutunca açılan renk menüsü -->
+  <div id="menu" class="menu" popover="manual" role="menu" aria-label="İşaret rengi seç">
+    <p class="menu-title" id="menuTitle"></p>
+    <button type="button" role="menuitem" data-mark="g" class="m-g"><i class="dot g"></i> Yeşil <small>Tamamlandı</small></button>
+    <button type="button" role="menuitem" data-mark="b" class="m-b"><i class="dot b"></i> Mavi <small>Kısmen</small></button>
+    <button type="button" role="menuitem" data-mark="r" class="m-r"><i class="dot r"></i> Kırmızı <small>Yapılmadı</small></button>
+    <button type="button" role="menuitem" data-mark="" class="m-clear"><i class="dot n"></i> Temizle</button>
+  </div>
+
+  <!-- Ekle / düzenle -->
+  <dialog id="editor" class="editor" aria-labelledby="editorTitle">
+    <form id="editorForm" method="dialog">
+      <h2 id="editorTitle">Yeni madde</h2>
+      <label>Madde adı
+        <input name="name" required maxlength="60" autocomplete="off" placeholder="Örn. Göğüs egzersizi">
+      </label>
+      <label>Hedef / not <span class="opt">(isteğe bağlı)</span>
+        <input name="detail" maxlength="80" autocomplete="off" placeholder="Örn. 3×12 tekrar, 100 g, 2000 kcal">
+      </label>
+      <div class="editor-actions">
+        <button type="button" id="deleteBtn" class="danger" hidden>Sil</button>
+        <span class="spacer"></span>
+        <button type="button" id="cancelBtn" class="ghost">Vazgeç</button>
+        <button type="submit" class="primary">Kaydet</button>
+      </div>
+    </form>
+  </dialog>
+
+  <script src="app.js"></script>
+</body>
+</html>
