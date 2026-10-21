@@ -12,22 +12,21 @@
 </head>
 <body data-tab="beslenme">
   <header class="topbar">
-    <h1 class="app-title">Günlük Plan</h1>
+    <div class="topbar-head">
+      <h1 class="app-title" id="appTitle">Günlük Plan</h1>
+      <button type="button" id="profileBtn" class="profile-circle-btn" aria-label="Profil sayfasını aç" title="Profil">👤</button>
+    </div>
     <nav class="tabs" role="tablist" aria-label="Kategoriler" id="tabs"></nav>
   </header>
 
   <main id="panel" class="panel" role="tabpanel" aria-live="polite"></main>
 
-  <footer class="foot">
+  <footer class="foot" id="mainFoot">
     <p class="legend">
-      <span><i class="dot g"></i> Dokun: yeşil işaretle / kaldır</span>
-      <span><i class="dot b"></i> Basılı tut (veya sağ tık): renk seç</span>
+      <span><i class="dot g"></i> Gün: dokun işaretle · basılı tut renk</span>
+      <span><i class="dot b"></i> Kart: dokun sayaç/miktar · basılı tut düzenle</span>
     </p>
-    <p class="backup">
-      <button type="button" id="exportBtn" class="link-btn">Yedekle</button> ·
-      <button type="button" id="importBtn" class="link-btn">Geri yükle</button>
-      <input type="file" id="importFile" accept="application/json" hidden>
-    </p>
+    <input type="file" id="importFile" accept="application/json" hidden>
   </footer>
 
   <!-- Basılı tutunca açılan renk menüsü -->
@@ -39,16 +38,92 @@
     <button type="button" role="menuitem" data-mark="" class="m-clear"><i class="dot n"></i> Temizle</button>
   </div>
 
-  <!-- Ekle / düzenle -->
+  <!-- Ekle / düzenle (Karta basılı tutunca açılır) -->
   <dialog id="editor" class="editor" aria-labelledby="editorTitle">
     <form id="editorForm" method="dialog">
       <h2 id="editorTitle">Yeni madde</h2>
       <label>Madde adı
-        <input name="name" required maxlength="60" autocomplete="off" placeholder="Örn. Göğüs egzersizi">
+        <input name="name" required maxlength="60" autocomplete="off" placeholder="Örn. Diş fırçalama, Göğüs egzersizi">
       </label>
       <label>Hedef / not <span class="opt">(isteğe bağlı)</span>
-        <input name="detail" maxlength="80" autocomplete="off" placeholder="Örn. 3×12 tekrar, 100 g, 2000 kcal">
+        <input name="detail" maxlength="80" autocomplete="off" placeholder="Örn. Sabah & akşam, 3×12 tekrar">
       </label>
+
+      <div class="field-block">
+        <span class="field-label">Sayaç / Tekrar / Miktar</span>
+        <div class="goal-type-row" id="goalTypeRow">
+          <button type="button" class="goal-type-btn active" data-goal-type="none">Yok</button>
+          <button type="button" class="goal-type-btn" data-goal-type="timer">⏱️ Sayaç</button>
+          <button type="button" class="goal-type-btn" data-goal-type="reps">🔁 Tekrar</button>
+          <button type="button" class="goal-type-btn" data-goal-type="amount">📊 Miktar</button>
+        </div>
+
+        <div id="goalTimerBox" class="goal-config-box" hidden>
+          <div class="inline-inputs">
+            <label>Dakika
+              <input type="number" name="timerMin" min="0" max="999" value="2">
+            </label>
+            <label>Saniye
+              <input type="number" name="timerSec" min="0" max="59" value="0">
+            </label>
+          </div>
+          <div class="preset-chips" id="timerPresets">
+            <button type="button" class="chip" data-min="1">1 dk</button>
+            <button type="button" class="chip" data-min="2">2 dk</button>
+            <button type="button" class="chip" data-min="3">3 dk</button>
+            <button type="button" class="chip" data-min="5">5 dk</button>
+            <button type="button" class="chip" data-min="10">10 dk</button>
+            <button type="button" class="chip" data-min="15">15 dk</button>
+            <button type="button" class="chip" data-min="30">30 dk</button>
+          </div>
+        </div>
+
+        <div id="goalRepsBox" class="goal-config-box" hidden>
+          <label>Hedef Tekrar Sayısı
+            <input type="number" name="repsTarget" min="1" max="99999" placeholder="Örn. 30">
+          </label>
+          <div class="preset-chips" id="repsPresets">
+            <button type="button" class="chip" data-reps="10">10 tekrar</button>
+            <button type="button" class="chip" data-reps="15">15 tekrar</button>
+            <button type="button" class="chip" data-reps="20">20 tekrar</button>
+            <button type="button" class="chip" data-reps="30">30 tekrar</button>
+            <button type="button" class="chip" data-reps="50">50 tekrar</button>
+            <button type="button" class="chip" data-reps="100">100 tekrar</button>
+          </div>
+        </div>
+
+        <div id="goalAmountBox" class="goal-config-box" hidden>
+          <div class="inline-inputs">
+            <label>Hedef Miktar
+              <input type="number" step="any" name="amountTarget" min="0.1" placeholder="Örn. 2000">
+            </label>
+            <label>Birim
+              <input type="text" name="amountUnit" maxlength="15" placeholder="ml, g, kcal...">
+            </label>
+          </div>
+          <div class="preset-chips" id="unitPresets">
+            <button type="button" class="chip" data-unit="ml">ml</button>
+            <button type="button" class="chip" data-unit="L">L</button>
+            <button type="button" class="chip" data-unit="g">g</button>
+            <button type="button" class="chip" data-unit="kcal">kcal</button>
+            <button type="button" class="chip" data-unit="adım">adım</button>
+            <button type="button" class="chip" data-unit="bardak">bardak</button>
+            <button type="button" class="chip" data-unit="sayfa">sayfa</button>
+            <button type="button" class="chip" data-unit="adet">adet</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Alt Başlıklar (Ana sayfada önizlemesi yok, sadece basılı tutup içine girince görünür) -->
+      <div class="field-block">
+        <span class="field-label">Alt başlıklar <span class="opt" id="subtaskCount">(0)</span></span>
+        <div id="subtasksList" class="subtasks-list"></div>
+        <div class="subtask-add-row">
+          <input type="text" id="newSubtaskInput" maxlength="80" autocomplete="off" placeholder="Alt başlık ekle...">
+          <button type="button" id="addSubtaskBtn" class="primary">＋ Ekle</button>
+        </div>
+      </div>
+
       <div class="editor-actions">
         <button type="button" id="deleteBtn" class="danger" hidden>Sil</button>
         <span class="spacer"></span>
@@ -56,6 +131,11 @@
         <button type="submit" class="primary">Kaydet</button>
       </div>
     </form>
+  </dialog>
+
+  <!-- Karta tıklayınca açılan Sayaç / Miktar / Tekrar Arayüzü -->
+  <dialog id="actionModal" class="editor" aria-labelledby="actionTitle">
+    <div id="actionBody"></div>
   </dialog>
 
   <script src="app.js"></script>
