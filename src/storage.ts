@@ -24,6 +24,8 @@ export function seedState(): AppDataState {
     tab: TABS[0].id,
     habits,
     marks: {},
+    progress: {},
+    profile: { firstName: '', lastName: '' },
   };
 }
 
@@ -33,6 +35,12 @@ export async function loadAppState(): Promise<AppDataState> {
     if (raw) {
       const parsed = JSON.parse(raw) as AppDataState;
       if (parsed && Array.isArray(parsed.habits) && parsed.marks) {
+        if (!parsed.progress || typeof parsed.progress !== 'object') {
+          parsed.progress = {};
+        }
+        if (!parsed.profile || typeof parsed.profile !== 'object') {
+          parsed.profile = { firstName: '', lastName: '' };
+        }
         for (const [tab, items] of Object.entries(DEFAULT_HABITS) as [
           TabId,
           [string, string][],

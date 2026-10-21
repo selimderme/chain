@@ -30,10 +30,13 @@ import * as DocumentPicker from 'expo-document-picker';
 
 import {
   AppDataState,
+  GoalType,
   Habit,
+  HabitGoal,
   MARKS,
   MARK_COLORS,
   MarkType,
+  Subtask,
   TABS,
   TabConfig,
   TabId,
@@ -45,10 +48,66 @@ import {
   formatDayTR,
   formatMonthTR,
   keyOf,
+  pad,
   parseKey,
   uid,
 } from './utils';
 import { loadAppState, saveAppState, seedState } from './storage';
+
+function formatDuration(totalSec: number): string {
+  const sec = Math.max(0, Math.round(totalSec));
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
+  const s = sec % 60;
+  if (h > 0) {
+    return `${pad(h)}:${pad(m)}:${pad(s)}`;
+  }
+  return `${pad(m)}:${pad(s)}`;
+}
+
+function formatTimerReadable(totalSec: number): string {
+  const sec = Math.max(0, Math.round(totalSec));
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  if (m > 0 && s > 0) return `${m} dk ${s} sn`;
+  if (m > 0) return `${m} dk`;
+  return `${s} sn`;
+}
+
+function getQuickSteps(goal: HabitGoal): number[] {
+  const t = goal.target || 10;
+  if (goal.type === 'reps') {
+    if (t <= 15) return [1, 2, 5];
+    if (t <= 50) return [1, 5, 10, 15];
+    return [5, 10, 20, 25];
+  }
+  if (t <= 15) return [1, 2, 5];
+  if (t <= 100) return [5, 10, 25, 50];
+  if (t <= 500) return [10, 25, 50, 100];
+  if (t <= 1500) return [50, 100, 250, 500];
+  return [100, 200, 250, 500];
+}
+
+function getProfileInitials(firstName?: string, lastName?: string): string {
+  const f = (firstName || '').trim();
+  const l = (lastName || '').trim();
+  if (f && l) {
+    return (f[0] + l[0]).toLocaleUpperCase('tr-TR');
+  }
+  const parts = (f || l).split(/\s+/).filter(Boolean);
+  if (parts.length >= 2) {
+    return (parts[0][0] + parts[parts.length - 1][0]).toLocaleUpperCase('tr-TR');
+  }
+  if (parts.length === 1) {
+    return parts[0].slice(0, 2).toLocaleUpperCase('tr-TR');
+  }
+  return '';
+}
+
+function formatNowTimestamp(): string {
+  const now = new Date();
+  return `${pad(now.getDate())}.${pad(now.getMonth() + 1)}.${now.getFullYear()} ${pad(now.getHours())}:${pad(now.getMinutes())}`;
+}
 
 interface MenuTarget {
   habitId: string;
@@ -138,12 +197,31 @@ function GunlukPlanScreen() {
   const [reorderMode, setReorderMode] = useState(false);
   const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
 
-  // Ekle / Düzenle Modal Durumu
+  // Ekle / Düzenle Modal Durumu (Container'a basılı tutunca açılır)
   const [editorOpen, setEditorOpen] = useState(false);
   const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
   const [habitName, setHabitName] = useState('');
   const [habitDetail, setHabitDetail] = useState('');
+  const [goalType, setGoalType] = useState<GoalType>('none');
+  const [timerMin, setTimerMin] = useState('2');
+  const [timerSec, setTimerSec] = useState('0');
+  const [goalTargetStr, setGoalTargetStr] = useState('');
+  const [goalUnit, setGoalUnit] = useState('');
+  const [editorSubtasks, setEditorSubtasks] = useState<Subtask[]>([]);
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState('');
   const [confirmDelete, setConfirmDelete] = useState(false);
+
+  // Sayaç / Miktar / Tekrar Arayüzü Durumu (Container'a dokununca açılır)
+  const [actionHabitId, setActionHabitId] = useState<string | null>(null);
+  const [timerRunning, setTimerRunning] = useState(false);
+  const [timerRemaining, setTimerRemaining] = useState(0);
+  const [customAmountStr, setCustomAmountStr] = useState('');
+
+  // Profil Sayfası Durumu
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [profileFirstName, setProfileFirstName] = useState('');
+  const [profileLastName, setProfileLastName] = useState('');
+  const [profileSavedBanner, setProfileSavedBanner] = useState(false);
 
   // Hero emoji animasyonu
   const heroAnim = useRef(new Animated.Value(0)).current;
@@ -151,6 +229,8 @@ function GunlukPlanScreen() {
   useEffect(() => {
     loadAppState().then((initial) => {
       setState(initial);
+      setProfileFirstName(initial.profile?.firstName || '');
+      setProfileLastName(initial.profile?.lastName || '');
       setLoaded(true);
     });
   }, []);
@@ -219,6 +299,10 @@ function GunlukPlanScreen() {
     return state.marks[habitId]?.[dateStr] || '';
   };
 
+  const getProgress = (habitId: string, dateStr: string): number => {
+    return state.progress?.[habitId]?.[dateStr] || 0;
+  };
+
   const setMark = (habitId: string, dateStr: string, val: MarkType | '') => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
     updateAndSave((prev) => {
@@ -239,6 +323,102 @@ function GunlukPlanScreen() {
     });
   };
 
+  const setProgressAndAutoMark = (
+    habit: Habit,
+    dateStr: string,
+    newVal: number
+  ) => {
+    const clamped = Math.max(0, Math.round(newVal * 100) / 100);
+    const target = habit.goal?.target || 0;
+    updateAndSave((prev) => {
+      const nextProgress = { ...(prev.progress || {}) };
+      const habitProg = { ...(nextProgress[habit.id] || {}) };
+      if (clamped > 0) {
+        habitProg[dateStr] = clamped;
+        nextProgress[habit.id] = habitProg;
+      } else {
+        delete habitProg[dateStr];
+        if (Object.keys(habitProg).length === 0) {
+          delete nextProgress[habit.id];
+        } else {
+          nextProgress[habit.id] = habitProg;
+        }
+      }
+
+      const nextMarks = { ...prev.marks };
+      const habitMarks = { ...(nextMarks[habit.id] || {}) };
+      if (target > 0) {
+        if (clamped >= target) {
+          habitMarks[dateStr] = 'g';
+          nextMarks[habit.id] = habitMarks;
+        } else if (clamped > 0) {
+          habitMarks[dateStr] = 'b';
+          nextMarks[habit.id] = habitMarks;
+        } else {
+          delete habitMarks[dateStr];
+          if (Object.keys(habitMarks).length === 0) {
+            delete nextMarks[habit.id];
+          } else {
+            nextMarks[habit.id] = habitMarks;
+          }
+        }
+      }
+      return { ...prev, progress: nextProgress, marks: nextMarks };
+    });
+  };
+
+  const actionHabit = useMemo(
+    () => state.habits.find((h) => h.id === actionHabitId) || null,
+    [state.habits, actionHabitId]
+  );
+
+  // Sayaç geri sayım döngüsü
+  useEffect(() => {
+    if (!timerRunning || !actionHabit || actionHabit.goal?.type !== 'timer') {
+      return;
+    }
+    const targetSec = actionHabit.goal.target || 0;
+    const interval = setInterval(() => {
+      setTimerRemaining((prev) => {
+        if (prev <= 1) {
+          setTimerRunning(false);
+          Haptics.notificationAsync(
+            Haptics.NotificationFeedbackType.Success
+          ).catch(() => {});
+          setProgressAndAutoMark(actionHabit, today.key, targetSec);
+          return 0;
+        }
+        const nextRem = prev - 1;
+        const elapsed = Math.max(0, targetSec - nextRem);
+        setProgressAndAutoMark(actionHabit, today.key, elapsed);
+        return nextRem;
+      });
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [timerRunning, actionHabit, today.key]);
+
+  const handleCardPress = (habit: Habit) => {
+    if (!habit.goal || habit.goal.type === 'none' || habit.goal.target <= 0) {
+      return;
+    }
+    Haptics.selectionAsync().catch(() => {});
+    setTimerRunning(false);
+    setCustomAmountStr('');
+    if (habit.goal.type === 'timer') {
+      const targetSec = habit.goal.target;
+      const doneSec = getProgress(habit.id, today.key);
+      const initialRem =
+        doneSec > 0 && doneSec < targetSec ? targetSec - doneSec : targetSec;
+      setTimerRemaining(initialRem);
+    }
+    setActionHabitId(habit.id);
+  };
+
+  const closeActionModal = () => {
+    setTimerRunning(false);
+    setActionHabitId(null);
+  };
+
   const handleCellPress = (habit: Habit, dateStr: string) => {
     const current = getMark(habit.id, dateStr);
     setMark(habit.id, dateStr, current ? '' : 'g');
@@ -254,10 +434,46 @@ function GunlukPlanScreen() {
   };
 
   const handleSelectTab = (tabId: TabId) => {
-    if (tabId === state.tab) return;
     Haptics.selectionAsync().catch(() => {});
+    if (profileOpen) {
+      setProfileOpen(false);
+    }
+    if (tabId === state.tab) return;
     setReorderMode(false);
     updateAndSave((prev) => ({ ...prev, tab: tabId }));
+  };
+
+  const handleToggleProfile = () => {
+    Haptics.selectionAsync().catch(() => {});
+    setProfileSavedBanner(false);
+    if (!profileOpen) {
+      setProfileFirstName(state.profile?.firstName || '');
+      setProfileLastName(state.profile?.lastName || '');
+      setReorderMode(false);
+    }
+    setProfileOpen((prev) => !prev);
+  };
+
+  const handleSaveProfile = () => {
+    const first = profileFirstName.trim();
+    const last = profileLastName.trim();
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+      () => {}
+    );
+    setProfileFirstName(first);
+    setProfileLastName(last);
+    updateAndSave((prev) => ({
+      ...prev,
+      profile: {
+        ...(prev.profile || { firstName: '', lastName: '' }),
+        firstName: first,
+        lastName: last,
+      },
+    }));
+    setProfileSavedBanner(true);
+    setTimeout(() => {
+      setProfileSavedBanner(false);
+    }, 3000);
   };
 
   const changeMonth = (delta: number | 'today') => {
@@ -296,12 +512,70 @@ function GunlukPlanScreen() {
   };
 
   const openEditor = (habit: Habit | null) => {
-    Haptics.selectionAsync().catch(() => {});
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     setEditingHabit(habit);
     setHabitName(habit ? habit.name : '');
     setHabitDetail(habit ? habit.detail : '');
+    const g = habit?.goal;
+    if (g && g.type !== 'none' && g.target > 0) {
+      setGoalType(g.type);
+      if (g.type === 'timer') {
+        setTimerMin(String(Math.floor(g.target / 60)));
+        setTimerSec(String(g.target % 60));
+        setGoalTargetStr('');
+        setGoalUnit('');
+      } else {
+        setGoalTargetStr(String(g.target));
+        setGoalUnit(g.unit || (g.type === 'reps' ? 'tekrar' : ''));
+        setTimerMin('2');
+        setTimerSec('0');
+      }
+    } else {
+      setGoalType('none');
+      setTimerMin('2');
+      setTimerSec('0');
+      setGoalTargetStr('');
+      setGoalUnit('');
+    }
+    setEditorSubtasks(habit?.subtasks ? [...habit.subtasks] : []);
+    setNewSubtaskTitle('');
     setConfirmDelete(false);
     setEditorOpen(true);
+  };
+
+  const syncSubtasksIfEditing = (nextList: Subtask[]) => {
+    setEditorSubtasks(nextList);
+    if (editingHabit) {
+      updateAndSave((prev) => ({
+        ...prev,
+        habits: prev.habits.map((h) =>
+          h.id === editingHabit.id ? { ...h, subtasks: nextList } : h
+        ),
+      }));
+    }
+  };
+
+  const handleAddSubtask = () => {
+    const t = newSubtaskTitle.trim();
+    if (!t) return;
+    Haptics.selectionAsync().catch(() => {});
+    const nextList = [...editorSubtasks, { id: uid(), title: t, done: false }];
+    syncSubtasksIfEditing(nextList);
+    setNewSubtaskTitle('');
+  };
+
+  const handleToggleSubtask = (subId: string) => {
+    Haptics.selectionAsync().catch(() => {});
+    const nextList = editorSubtasks.map((s) =>
+      s.id === subId ? { ...s, done: !s.done } : s
+    );
+    syncSubtasksIfEditing(nextList);
+  };
+
+  const handleRemoveSubtask = (subId: string) => {
+    Haptics.selectionAsync().catch(() => {});
+    const nextList = editorSubtasks.filter((s) => s.id !== subId);
+    syncSubtasksIfEditing(nextList);
   };
 
   const saveEditor = () => {
@@ -311,6 +585,47 @@ function GunlukPlanScreen() {
       Alert.alert('Uyarı', 'Lütfen bir madde adı girin.');
       return;
     }
+
+    let finalGoal: HabitGoal | undefined = undefined;
+    if (goalType === 'timer') {
+      const m = Math.max(0, parseInt(timerMin || '0', 10) || 0);
+      const s = Math.max(0, parseInt(timerSec || '0', 10) || 0);
+      const totalSec = m * 60 + s;
+      if (totalSec <= 0) {
+        Alert.alert('Uyarı', 'Lütfen geçerli bir sayaç süresi girin.');
+        return;
+      }
+      finalGoal = { type: 'timer', target: totalSec, unit: 'sn' };
+    } else if (goalType === 'reps') {
+      const val = parseFloat(goalTargetStr.replace(',', '.')) || 0;
+      if (val <= 0) {
+        Alert.alert('Uyarı', 'Lütfen geçerli bir tekrar sayısı girin.');
+        return;
+      }
+      finalGoal = {
+        type: 'reps',
+        target: Math.round(val),
+        unit: 'tekrar',
+      };
+    } else if (goalType === 'amount') {
+      const val = parseFloat(goalTargetStr.replace(',', '.')) || 0;
+      if (val <= 0) {
+        Alert.alert('Uyarı', 'Lütfen geçerli bir hedef miktar girin.');
+        return;
+      }
+      finalGoal = {
+        type: 'amount',
+        target: val,
+        unit: goalUnit.trim() || 'birim',
+      };
+    }
+
+    // Eğer yeni bir alt başlık yazılıp "+ Ekle"ye basılmadıysa onu da dahil et
+    const pendingSub = newSubtaskTitle.trim();
+    const finalSubtasks = pendingSub
+      ? [...editorSubtasks, { id: uid(), title: pendingSub, done: false }]
+      : editorSubtasks;
+
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
       () => {}
     );
@@ -320,7 +635,13 @@ function GunlukPlanScreen() {
           ...prev,
           habits: prev.habits.map((h) =>
             h.id === editingHabit.id
-              ? { ...h, name: trimmedName, detail: trimmedDetail }
+              ? {
+                  ...h,
+                  name: trimmedName,
+                  detail: trimmedDetail,
+                  goal: finalGoal,
+                  subtasks: finalSubtasks,
+                }
               : h
           ),
         };
@@ -334,6 +655,8 @@ function GunlukPlanScreen() {
             tab: prev.tab,
             name: trimmedName,
             detail: trimmedDetail,
+            goal: finalGoal,
+            subtasks: finalSubtasks,
           },
         ],
       };
@@ -354,11 +677,14 @@ function GunlukPlanScreen() {
     const deleteId = editingHabit.id;
     updateAndSave((prev) => {
       const nextMarks = { ...prev.marks };
+      const nextProg = { ...(prev.progress || {}) };
       delete nextMarks[deleteId];
+      delete nextProg[deleteId];
       return {
         ...prev,
         habits: prev.habits.filter((h) => h.id !== deleteId),
         marks: nextMarks,
+        progress: nextProg,
       };
     });
     setEditorOpen(false);
@@ -367,8 +693,28 @@ function GunlukPlanScreen() {
   // Yedekle (iOS/Android Share Sheet & Web İndirme)
   const handleExport = async () => {
     try {
+      const nowStamp = formatNowTimestamp();
+      const exportState: AppDataState = {
+        ...state,
+        profile: {
+          firstName: state.profile?.firstName || '',
+          lastName: state.profile?.lastName || '',
+          ...state.profile,
+          lastBackupAt: nowStamp,
+        },
+      };
+      updateAndSave((prev) => ({
+        ...prev,
+        profile: {
+          firstName: prev.profile?.firstName || '',
+          lastName: prev.profile?.lastName || '',
+          ...prev.profile,
+          lastBackupAt: nowStamp,
+        },
+      }));
+
       const fileName = `gunluk-plan-${keyOf(new Date())}.json`;
-      const jsonStr = JSON.stringify(state, null, 2);
+      const jsonStr = JSON.stringify(exportState, null, 2);
       if (Platform.OS === 'web' && typeof document !== 'undefined') {
         const blob = new Blob([jsonStr], { type: 'application/json' });
         const url = URL.createObjectURL(blob);
@@ -430,14 +776,37 @@ function GunlukPlanScreen() {
         Haptics.notificationAsync(
           Haptics.NotificationFeedbackType.Success
         ).catch(() => {});
-        updateAndSave(() => ({
+        const nowStamp = formatNowTimestamp();
+        const restoredFirstName =
+          typeof parsed.profile?.firstName === 'string'
+            ? parsed.profile.firstName
+            : state.profile?.firstName || '';
+        const restoredLastName =
+          typeof parsed.profile?.lastName === 'string'
+            ? parsed.profile.lastName
+            : state.profile?.lastName || '';
+        setProfileFirstName(restoredFirstName);
+        setProfileLastName(restoredLastName);
+        updateAndSave((prev) => ({
           v: 1,
           habits: parsed.habits,
           marks: parsed.marks,
+          progress:
+            parsed.progress && typeof parsed.progress === 'object'
+              ? parsed.progress
+              : {},
           tab: TABS.some((t) => t.id === parsed.tab)
             ? parsed.tab
             : TABS[0].id,
+          profile: {
+            firstName: restoredFirstName,
+            lastName: restoredLastName,
+            lastBackupAt:
+              parsed.profile?.lastBackupAt || prev.profile?.lastBackupAt,
+            lastRestoreAt: nowStamp,
+          },
         }));
+        Alert.alert('Başarılı', 'Yedek verileri başarıyla geri yüklendi.');
       };
 
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -605,6 +974,26 @@ function GunlukPlanScreen() {
   const currentMenuMark = menuTarget
     ? getMark(menuTarget.habitId, menuTarget.dateStr)
     : '';
+  const userInitials = getProfileInitials(
+    state.profile?.firstName,
+    state.profile?.lastName
+  );
+  const userFullName = [state.profile?.firstName, state.profile?.lastName]
+    .filter(Boolean)
+    .join(' ')
+    .trim();
+  const allDoneToday = state.habits.filter(
+    (h) => getMark(h.id, today.key) === 'g'
+  ).length;
+  const totalMarkedDays = Object.values(state.marks).reduce(
+    (acc, m) => acc + Object.keys(m || {}).length,
+    0
+  );
+  const maxBestStreak = state.habits.reduce(
+    (max, h) =>
+      Math.max(max, calculateStreaks(state.marks[h.id], today.key).best),
+    0
+  );
 
   return (
     <SafeAreaView
@@ -613,7 +1002,7 @@ function GunlukPlanScreen() {
     >
       <StatusBar style={theme.isDark ? 'light' : 'dark'} />
 
-      {/* Üst Başlık */}
+      {/* Üst Başlık & Profil Dairesi */}
       <View
         style={[
           styles.topbar,
@@ -625,15 +1014,452 @@ function GunlukPlanScreen() {
           },
         ]}
       >
-        <Text style={[styles.appTitle, { color: theme.muted }]}>
-          Günlük Plan
-        </Text>
+        <View style={styles.topbarLeft}>
+          {profileOpen ? (
+            <TouchableOpacity
+              onPress={() => {
+                Haptics.selectionAsync().catch(() => {});
+                setProfileOpen(false);
+              }}
+              style={styles.backToHomeBtn}
+              activeOpacity={0.75}
+            >
+              <Text style={[styles.backToHomeArrow, { color: theme.accent }]}>
+                ‹
+              </Text>
+              <Text style={[styles.appTitle, { color: theme.text }]}>
+                Profil
+              </Text>
+            </TouchableOpacity>
+          ) : (
+            <Text style={[styles.appTitle, { color: theme.muted }]}>
+              Günlük Plan
+            </Text>
+          )}
+        </View>
+
+        <TouchableOpacity
+          onPress={handleToggleProfile}
+          activeOpacity={0.8}
+          accessibilityLabel="Profil sayfasını aç"
+          style={[
+            styles.profileCircleBtn,
+            {
+              backgroundColor: profileOpen
+                ? theme.accent
+                : theme.isDark
+                ? 'rgba(255,255,255,0.1)'
+                : 'rgba(0,0,0,0.07)',
+              borderColor: theme.accent,
+            },
+          ]}
+        >
+          {userInitials ? (
+            <Text
+              style={[
+                styles.profileCircleInitials,
+                {
+                  color: profileOpen ? theme.accentInk : theme.text,
+                },
+              ]}
+            >
+              {userInitials}
+            </Text>
+          ) : (
+            <Text style={styles.profileCircleEmoji}>👤</Text>
+          )}
+        </TouchableOpacity>
       </View>
 
-      {/* Ana İçerik */}
-      <ScrollView
-        style={styles.mainScroll}
-        contentContainerStyle={styles.mainContent}
+      {profileOpen ? (
+        /* Profil Sayfası */
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={{ flex: 1 }}
+        >
+          <ScrollView
+            style={styles.mainScroll}
+            contentContainerStyle={styles.mainContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {/* Profil Özet Kartı */}
+            <View
+              style={[
+                styles.card,
+                styles.profileHeaderCard,
+                {
+                  backgroundColor: theme.surface,
+                  borderRadius: theme.radius,
+                  borderColor: theme.cardBorderColor,
+                  borderWidth: theme.cardBorderWidth,
+                },
+              ]}
+            >
+              <View
+                style={[
+                  styles.profileBigAvatar,
+                  {
+                    backgroundColor: theme.accent,
+                  },
+                ]}
+              >
+                {userInitials ? (
+                  <Text
+                    style={[
+                      styles.profileBigInitials,
+                      { color: theme.accentInk },
+                    ]}
+                  >
+                    {userInitials}
+                  </Text>
+                ) : (
+                  <Text style={styles.profileBigEmoji}>👤</Text>
+                )}
+              </View>
+
+              <Text
+                style={[
+                  styles.profileDisplayName,
+                  {
+                    color: theme.text,
+                    fontStyle: theme.headItalic ? 'italic' : 'normal',
+                  },
+                ]}
+              >
+                {userFullName || 'Misafir Kullanıcı'}
+              </Text>
+              <Text style={[styles.profileSubtitle, { color: theme.muted }]}>
+                {userFullName
+                  ? 'Günlük Plan Profili'
+                  : 'Aşağıdan adınızı ve soyadınızı kaydedebilirsiniz'}
+              </Text>
+
+              <View style={styles.profileStatsRow}>
+                <View
+                  style={[
+                    styles.profileStatBox,
+                    {
+                      backgroundColor: theme.isDark
+                        ? 'rgba(255,255,255,0.05)'
+                        : 'rgba(0,0,0,0.035)',
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[styles.profileStatVal, { color: theme.text }]}
+                  >
+                    {state.habits.length}
+                  </Text>
+                  <Text
+                    style={[styles.profileStatLbl, { color: theme.muted }]}
+                  >
+                    Toplam Madde
+                  </Text>
+                </View>
+
+                <View
+                  style={[
+                    styles.profileStatBox,
+                    {
+                      backgroundColor: theme.isDark
+                        ? 'rgba(255,255,255,0.05)'
+                        : 'rgba(0,0,0,0.035)',
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.profileStatVal,
+                      { color: MARK_COLORS.green },
+                    ]}
+                  >
+                    {allDoneToday}/{state.habits.length}
+                  </Text>
+                  <Text
+                    style={[styles.profileStatLbl, { color: theme.muted }]}
+                  >
+                    Bugün Tamam
+                  </Text>
+                </View>
+
+                <View
+                  style={[
+                    styles.profileStatBox,
+                    {
+                      backgroundColor: theme.isDark
+                        ? 'rgba(255,255,255,0.05)'
+                        : 'rgba(0,0,0,0.035)',
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[styles.profileStatVal, { color: theme.text }]}
+                  >
+                    {maxBestStreak} gün
+                  </Text>
+                  <Text
+                    style={[styles.profileStatLbl, { color: theme.muted }]}
+                  >
+                    En Uzun Zincir
+                  </Text>
+                </View>
+              </View>
+            </View>
+
+            {/* Ad Soyad Girme ve Kaydetme Kartı */}
+            <View
+              style={[
+                styles.card,
+                styles.profileSectionCard,
+                {
+                  backgroundColor: theme.surface,
+                  borderRadius: theme.radius,
+                  borderColor: theme.cardBorderColor,
+                  borderWidth: theme.cardBorderWidth,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.profileSectionTitle,
+                  {
+                    color: theme.text,
+                    fontStyle: theme.headItalic ? 'italic' : 'normal',
+                  },
+                ]}
+              >
+                👤 Kişisel Bilgiler
+              </Text>
+
+              <Text style={[styles.inputLabel, { color: theme.text }]}>Ad</Text>
+              <TextInput
+                value={profileFirstName}
+                onChangeText={setProfileFirstName}
+                maxLength={40}
+                placeholder="Adınızı girin"
+                placeholderTextColor={theme.muted}
+                style={[
+                  styles.textInput,
+                  {
+                    color: theme.text,
+                    backgroundColor: theme.isDark
+                      ? 'rgba(255,255,255,0.06)'
+                      : 'rgba(0,0,0,0.04)',
+                    borderColor: theme.isDark
+                      ? 'rgba(255,255,255,0.18)'
+                      : 'rgba(0,0,0,0.15)',
+                  },
+                ]}
+              />
+
+              <Text style={[styles.inputLabel, { color: theme.text }]}>
+                Soyad
+              </Text>
+              <TextInput
+                value={profileLastName}
+                onChangeText={setProfileLastName}
+                maxLength={40}
+                placeholder="Soyadınızı girin"
+                placeholderTextColor={theme.muted}
+                onSubmitEditing={handleSaveProfile}
+                style={[
+                  styles.textInput,
+                  {
+                    color: theme.text,
+                    backgroundColor: theme.isDark
+                      ? 'rgba(255,255,255,0.06)'
+                      : 'rgba(0,0,0,0.04)',
+                    borderColor: theme.isDark
+                      ? 'rgba(255,255,255,0.18)'
+                      : 'rgba(0,0,0,0.15)',
+                  },
+                ]}
+              />
+
+              <TouchableOpacity
+                onPress={handleSaveProfile}
+                activeOpacity={0.82}
+                style={[
+                  styles.primaryBtn,
+                  styles.profileFullBtn,
+                  { backgroundColor: theme.accent },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.primaryBtnText,
+                    { color: theme.accentInk, fontSize: 15 },
+                  ]}
+                >
+                  ✓ Bilgileri Kaydet
+                </Text>
+              </TouchableOpacity>
+
+              {profileSavedBanner && (
+                <View
+                  style={[
+                    styles.profileSavedToast,
+                    {
+                      backgroundColor: 'rgba(34, 197, 94, 0.15)',
+                      borderColor: MARK_COLORS.green,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.profileSavedToastText,
+                      { color: MARK_COLORS.green },
+                    ]}
+                  >
+                    ✓ Ad ve soyad bilgileriniz başarıyla kaydedildi.
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            {/* Yedekle / Yedekten Yükle Bilgileri ve İşlemleri Kartı */}
+            <View
+              style={[
+                styles.card,
+                styles.profileSectionCard,
+                {
+                  backgroundColor: theme.surface,
+                  borderRadius: theme.radius,
+                  borderColor: theme.cardBorderColor,
+                  borderWidth: theme.cardBorderWidth,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.profileSectionTitle,
+                  {
+                    color: theme.text,
+                    fontStyle: theme.headItalic ? 'italic' : 'normal',
+                  },
+                ]}
+              >
+                💾 Yedekleme ve Geri Yükleme
+              </Text>
+              <Text
+                style={[styles.profileSectionDesc, { color: theme.muted }]}
+              >
+                Tüm alışkanlıklarınız, zincirleriniz, sayaç/miktar kayıtlarınız
+                ve profil bilgileriniz cihazınızda saklanır. Veri kaybını
+                önlemek veya başka bir cihaza geçmek için verilerinizi
+                yedekleyebilir ve istediğiniz zaman yedekten geri
+                yükleyebilirsiniz.
+              </Text>
+
+              <View
+                style={[
+                  styles.backupInfoBox,
+                  {
+                    backgroundColor: theme.isDark
+                      ? 'rgba(255,255,255,0.04)'
+                      : 'rgba(0,0,0,0.03)',
+                    borderColor: theme.isDark
+                      ? 'rgba(255,255,255,0.12)'
+                      : 'rgba(0,0,0,0.09)',
+                  },
+                ]}
+              >
+                <View style={styles.backupInfoRow}>
+                  <Text
+                    style={[styles.backupInfoLabel, { color: theme.muted }]}
+                  >
+                    Kayıtlı Alışkanlık:
+                  </Text>
+                  <Text style={[styles.backupInfoVal, { color: theme.text }]}>
+                    {state.habits.length} madde ({TABS.length} kategori)
+                  </Text>
+                </View>
+                <View style={styles.backupInfoRow}>
+                  <Text
+                    style={[styles.backupInfoLabel, { color: theme.muted }]}
+                  >
+                    Toplam İşaretlenen Gün:
+                  </Text>
+                  <Text style={[styles.backupInfoVal, { color: theme.text }]}>
+                    {totalMarkedDays} kayıt
+                  </Text>
+                </View>
+                <View style={styles.backupInfoRow}>
+                  <Text
+                    style={[styles.backupInfoLabel, { color: theme.muted }]}
+                  >
+                    Son Yedekleme:
+                  </Text>
+                  <Text style={[styles.backupInfoVal, { color: theme.text }]}>
+                    {state.profile?.lastBackupAt || 'Henüz yedek alınmadı'}
+                  </Text>
+                </View>
+                <View style={styles.backupInfoRow}>
+                  <Text
+                    style={[styles.backupInfoLabel, { color: theme.muted }]}
+                  >
+                    Son Geri Yükleme:
+                  </Text>
+                  <Text style={[styles.backupInfoVal, { color: theme.text }]}>
+                    {state.profile?.lastRestoreAt ||
+                      'Henüz geri yükleme yapılmadı'}
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.profileBackupBtns}>
+                <TouchableOpacity
+                  onPress={handleExport}
+                  activeOpacity={0.82}
+                  style={[
+                    styles.primaryBtn,
+                    styles.profileFullBtn,
+                    { backgroundColor: theme.accent },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.primaryBtnText,
+                      { color: theme.accentInk, fontSize: 15 },
+                    ]}
+                  >
+                    📥 Yedekle (Dışa Aktar)
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={handleImport}
+                  activeOpacity={0.82}
+                  style={[
+                    styles.ghostBtn,
+                    styles.profileFullBtn,
+                    {
+                      borderColor: theme.accent,
+                      backgroundColor: theme.isDark
+                        ? 'rgba(255,255,255,0.04)'
+                        : 'rgba(0,0,0,0.02)',
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.ghostBtnText,
+                      { color: theme.text, fontSize: 15 },
+                    ]}
+                  >
+                    📤 Yedekten Yükle (Geri Yükle)
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
+      ) : (
+        /* Ana İçerik */
+        <ScrollView
+          style={styles.mainScroll}
+          contentContainerStyle={styles.mainContent}
         showsVerticalScrollIndicator={false}
       >
         {/* Hero Kartı */}
@@ -934,11 +1760,31 @@ function GunlukPlanScreen() {
               }
               const todayMark = getMark(h.id, today.key);
               const todayMarkObj = todayMark ? MARKS[todayMark] : null;
+              const todayProg = getProgress(h.id, today.key);
+              const hasActiveGoal =
+                !!h.goal && h.goal.type !== 'none' && h.goal.target > 0;
+
+              let goalBadgeText = '';
+              if (hasActiveGoal && h.goal) {
+                if (h.goal.type === 'timer') {
+                  goalBadgeText =
+                    todayProg > 0 && todayProg < h.goal.target
+                      ? `⏱️ ${formatDuration(todayProg)} / ${formatTimerReadable(h.goal.target)}`
+                      : `⏱️ ${formatTimerReadable(h.goal.target)}`;
+                } else if (h.goal.type === 'reps') {
+                  goalBadgeText = `🔁 ${todayProg}/${h.goal.target} tekrar`;
+                } else if (h.goal.type === 'amount') {
+                  goalBadgeText = `📊 ${todayProg}/${h.goal.target}${h.goal.unit ? ' ' + h.goal.unit : ''}`;
+                }
+              }
 
               return (
-                <View
+                <Pressable
                   key={h.id}
-                  style={[
+                  onPress={() => handleCardPress(h)}
+                  onLongPress={() => openEditor(h)}
+                  delayLongPress={380}
+                  style={({ pressed }) => [
                     styles.card,
                     {
                       backgroundColor: theme.surface,
@@ -950,12 +1796,21 @@ function GunlukPlanScreen() {
                         : theme.cardBorderWidth,
                       borderLeftColor:
                         theme.leftAccentBar || theme.cardBorderColor,
+                      opacity: pressed ? 0.92 : 1,
                     },
                   ]}
                 >
-                  {/* Kart Üst Kısmı */}
+                  {/* Kart Üst Kısmı (Basılı tut: Düzenle · Dokun: Sayaç / Miktar) */}
                   <View style={styles.cardHead}>
-                    <View style={styles.cardInfo}>
+                    <Pressable
+                      onPress={() => handleCardPress(h)}
+                      onLongPress={() => openEditor(h)}
+                      delayLongPress={380}
+                      style={({ pressed }) => [
+                        styles.cardInfo,
+                        { opacity: pressed ? 0.78 : 1 },
+                      ]}
+                    >
                       <View style={styles.cardTitleGroup}>
                         <Text
                           style={[
@@ -996,21 +1851,33 @@ function GunlukPlanScreen() {
                             {monthDone}/{dim}
                           </Text>
                         </Text>
+                        {!!goalBadgeText && (
+                          <View
+                            style={[
+                              styles.goalChip,
+                              {
+                                backgroundColor: theme.isDark
+                                  ? 'rgba(255,255,255,0.1)'
+                                  : 'rgba(0,0,0,0.06)',
+                                borderColor: theme.accent,
+                              },
+                            ]}
+                          >
+                            <Text
+                              style={[
+                                styles.goalChipText,
+                                { color: theme.text },
+                              ]}
+                            >
+                              {goalBadgeText}
+                            </Text>
+                          </View>
+                        )}
                       </View>
-                    </View>
+                    </Pressable>
 
-                    {/* Düzenle & Bugün Butonu */}
+                    {/* Bugün Butonu */}
                     <View style={styles.cardActions}>
-                      <TouchableOpacity
-                        onPress={() => openEditor(h)}
-                        style={styles.editBtn}
-                        accessibilityLabel={`${h.name} maddesini düzenle`}
-                      >
-                        <Text style={{ color: theme.muted, fontSize: 18 }}>
-                          ✎
-                        </Text>
-                      </TouchableOpacity>
-
                       <View style={styles.todayBtnWrap}>
                         <Pressable
                           onPress={() => handleCellPress(h, today.key)}
@@ -1129,13 +1996,13 @@ function GunlukPlanScreen() {
                       );
                     })}
                   </HabitWeekScroll>
-                </View>
+                </Pressable>
               );
             })}
           </View>
         )}
 
-        {/* Alt Bilgi & Yedekleme */}
+        {/* Alt Bilgi */}
         <View style={styles.footer}>
           <View style={styles.legendRow}>
             <View style={styles.legendItem}>
@@ -1143,34 +2010,21 @@ function GunlukPlanScreen() {
                 style={[styles.dotSmall, { backgroundColor: MARK_COLORS.green }]}
               />
               <Text style={[styles.legendText, { color: theme.muted }]}>
-                Dokun: yeşil işaretle / kaldır
+                Gün: dokun işaretle · basılı tut renk
               </Text>
             </View>
             <View style={styles.legendItem}>
               <View
-                style={[styles.dotSmall, { backgroundColor: MARK_COLORS.blue }]}
+                style={[styles.dotSmall, { backgroundColor: theme.accent }]}
               />
               <Text style={[styles.legendText, { color: theme.muted }]}>
-                Basılı tut: renk seç
+                Kart: dokun sayaç/miktar · basılı tut düzenle
               </Text>
             </View>
           </View>
-
-          <View style={styles.backupRow}>
-            <TouchableOpacity onPress={handleExport} style={styles.linkBtn}>
-              <Text style={[styles.linkBtnText, { color: activeTab.color }]}>
-                Yedekle
-              </Text>
-            </TouchableOpacity>
-            <Text style={{ color: theme.muted }}> · </Text>
-            <TouchableOpacity onPress={handleImport} style={styles.linkBtn}>
-              <Text style={[styles.linkBtnText, { color: activeTab.color }]}>
-                Geri yükle
-              </Text>
-            </TouchableOpacity>
-          </View>
         </View>
       </ScrollView>
+      )}
 
       {/* Alt Sekme Çubuğu (Bottom Tab Bar) */}
       <View
@@ -1195,7 +2049,7 @@ function GunlukPlanScreen() {
             const done = hs.filter(
               (h) => getMark(h.id, today.key) === 'g'
             ).length;
-            const selected = t.id === state.tab;
+            const selected = !profileOpen && t.id === state.tab;
             return (
               <TouchableOpacity
                 key={t.id}
@@ -1337,7 +2191,7 @@ function GunlukPlanScreen() {
         </Pressable>
       </Modal>
 
-      {/* Madde Ekle / Düzenle Penceresi */}
+      {/* Madde Ekle / Düzenle Penceresi (Container'a basılı tutunca açılır) */}
       <Modal
         visible={editorOpen}
         transparent
@@ -1358,125 +2212,1167 @@ function GunlukPlanScreen() {
                 {
                   backgroundColor: theme.surface,
                   borderRadius: theme.radius,
+                  maxHeight: '88%',
                 },
               ]}
               onPress={(e) => e.stopPropagation()}
             >
-              <Text
-                style={[
-                  styles.editorTitle,
-                  {
-                    color: theme.text,
-                    fontStyle: theme.headItalic ? 'italic' : 'normal',
-                  },
-                ]}
+              <ScrollView
+                showsVerticalScrollIndicator={false}
+                keyboardShouldPersistTaps="handled"
               >
-                {editingHabit ? 'Maddeyi düzenle' : 'Yeni madde'}
-              </Text>
-
-              <Text style={[styles.inputLabel, { color: theme.text }]}>
-                Madde adı
-              </Text>
-              <TextInput
-                value={habitName}
-                onChangeText={setHabitName}
-                maxLength={60}
-                placeholder="Örn. Göğüs egzersizi"
-                placeholderTextColor={theme.muted}
-                autoFocus
-                style={[
-                  styles.textInput,
-                  {
-                    color: theme.text,
-                    backgroundColor: theme.isDark
-                      ? 'rgba(255,255,255,0.06)'
-                      : 'rgba(0,0,0,0.04)',
-                    borderColor: theme.isDark
-                      ? 'rgba(255,255,255,0.18)'
-                      : 'rgba(0,0,0,0.15)',
-                  },
-                ]}
-              />
-
-              <Text style={[styles.inputLabel, { color: theme.text }]}>
-                Hedef / not{' '}
-                <Text style={{ fontWeight: '400', color: theme.muted }}>
-                  (isteğe bağlı)
+                <Text
+                  style={[
+                    styles.editorTitle,
+                    {
+                      color: theme.text,
+                      fontStyle: theme.headItalic ? 'italic' : 'normal',
+                    },
+                  ]}
+                >
+                  {editingHabit ? 'Maddeyi düzenle' : 'Yeni madde'}
                 </Text>
-              </Text>
-              <TextInput
-                value={habitDetail}
-                onChangeText={setHabitDetail}
-                maxLength={80}
-                placeholder="Örn. 3×12 tekrar, 100 g, 2000 kcal"
-                placeholderTextColor={theme.muted}
-                onSubmitEditing={saveEditor}
-                style={[
-                  styles.textInput,
-                  {
-                    color: theme.text,
-                    backgroundColor: theme.isDark
-                      ? 'rgba(255,255,255,0.06)'
-                      : 'rgba(0,0,0,0.04)',
-                    borderColor: theme.isDark
-                      ? 'rgba(255,255,255,0.18)'
-                      : 'rgba(0,0,0,0.15)',
-                  },
-                ]}
-              />
 
-              <View style={styles.editorActions}>
-                {editingHabit && (
-                  <TouchableOpacity
-                    onPress={handleDeleteHabit}
+                <Text style={[styles.inputLabel, { color: theme.text }]}>
+                  Madde adı
+                </Text>
+                <TextInput
+                  value={habitName}
+                  onChangeText={setHabitName}
+                  maxLength={60}
+                  placeholder="Örn. Diş fırçalama, Göğüs egzersizi"
+                  placeholderTextColor={theme.muted}
+                  style={[
+                    styles.textInput,
+                    {
+                      color: theme.text,
+                      backgroundColor: theme.isDark
+                        ? 'rgba(255,255,255,0.06)'
+                        : 'rgba(0,0,0,0.04)',
+                      borderColor: theme.isDark
+                        ? 'rgba(255,255,255,0.18)'
+                        : 'rgba(0,0,0,0.15)',
+                    },
+                  ]}
+                />
+
+                <Text style={[styles.inputLabel, { color: theme.text }]}>
+                  Hedef / not{' '}
+                  <Text style={{ fontWeight: '400', color: theme.muted }}>
+                    (isteğe bağlı)
+                  </Text>
+                </Text>
+                <TextInput
+                  value={habitDetail}
+                  onChangeText={setHabitDetail}
+                  maxLength={80}
+                  placeholder="Örn. Sabah & akşam, 3×12 tekrar"
+                  placeholderTextColor={theme.muted}
+                  style={[
+                    styles.textInput,
+                    {
+                      color: theme.text,
+                      backgroundColor: theme.isDark
+                        ? 'rgba(255,255,255,0.06)'
+                        : 'rgba(0,0,0,0.04)',
+                      borderColor: theme.isDark
+                        ? 'rgba(255,255,255,0.18)'
+                        : 'rgba(0,0,0,0.15)',
+                    },
+                  ]}
+                />
+
+                {/* Sayaç / Tekrar / Miktar Seçimi */}
+                <Text style={[styles.inputLabel, { color: theme.text }]}>
+                  Sayaç / Tekrar / Miktar
+                </Text>
+                <View style={styles.goalTypeRow}>
+                  {(
+                    [
+                      { id: 'none', label: 'Yok' },
+                      { id: 'timer', label: '⏱️ Sayaç' },
+                      { id: 'reps', label: '🔁 Tekrar' },
+                      { id: 'amount', label: '📊 Miktar' },
+                    ] as { id: GoalType; label: string }[]
+                  ).map((opt) => {
+                    const active = goalType === opt.id;
+                    return (
+                      <TouchableOpacity
+                        key={opt.id}
+                        onPress={() => {
+                          Haptics.selectionAsync().catch(() => {});
+                          setGoalType(opt.id);
+                        }}
+                        style={[
+                          styles.goalTypeBtn,
+                          {
+                            backgroundColor: active
+                              ? theme.accent
+                              : theme.isDark
+                              ? 'rgba(255,255,255,0.06)'
+                              : 'rgba(0,0,0,0.05)',
+                            borderColor: active
+                              ? theme.accent
+                              : theme.isDark
+                              ? 'rgba(255,255,255,0.16)'
+                              : 'rgba(0,0,0,0.12)',
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.goalTypeBtnText,
+                            {
+                              color: active ? theme.accentInk : theme.text,
+                            },
+                          ]}
+                        >
+                          {opt.label}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
+                </View>
+
+                {goalType === 'timer' && (
+                  <View
                     style={[
-                      styles.dangerBtn,
-                      confirmDelete && styles.dangerBtnConfirm,
+                      styles.goalConfigBox,
+                      {
+                        backgroundColor: theme.isDark
+                          ? 'rgba(255,255,255,0.04)'
+                          : 'rgba(0,0,0,0.03)',
+                        borderColor: theme.isDark
+                          ? 'rgba(255,255,255,0.12)'
+                          : 'rgba(0,0,0,0.1)',
+                      },
+                    ]}
+                  >
+                    <View style={styles.inlineInputsRow}>
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[styles.subInputLabel, { color: theme.muted }]}
+                        >
+                          Dakika
+                        </Text>
+                        <TextInput
+                          value={timerMin}
+                          onChangeText={(v) =>
+                            setTimerMin(v.replace(/[^0-9]/g, ''))
+                          }
+                          keyboardType="number-pad"
+                          maxLength={3}
+                          placeholder="2"
+                          placeholderTextColor={theme.muted}
+                          style={[
+                            styles.smallInput,
+                            {
+                              color: theme.text,
+                              borderColor: theme.isDark
+                                ? 'rgba(255,255,255,0.18)'
+                                : 'rgba(0,0,0,0.15)',
+                            },
+                          ]}
+                        />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[styles.subInputLabel, { color: theme.muted }]}
+                        >
+                          Saniye
+                        </Text>
+                        <TextInput
+                          value={timerSec}
+                          onChangeText={(v) =>
+                            setTimerSec(v.replace(/[^0-9]/g, ''))
+                          }
+                          keyboardType="number-pad"
+                          maxLength={2}
+                          placeholder="0"
+                          placeholderTextColor={theme.muted}
+                          style={[
+                            styles.smallInput,
+                            {
+                              color: theme.text,
+                              borderColor: theme.isDark
+                                ? 'rgba(255,255,255,0.18)'
+                                : 'rgba(0,0,0,0.15)',
+                            },
+                          ]}
+                        />
+                      </View>
+                    </View>
+                    <View style={styles.presetChipsRow}>
+                      {[1, 2, 3, 5, 10, 15, 30].map((m) => (
+                        <TouchableOpacity
+                          key={m}
+                          onPress={() => {
+                            Haptics.selectionAsync().catch(() => {});
+                            setTimerMin(String(m));
+                            setTimerSec('0');
+                          }}
+                          style={[
+                            styles.presetChip,
+                            {
+                              backgroundColor:
+                                timerMin === String(m) &&
+                                (timerSec === '0' || timerSec === '')
+                                  ? theme.accent
+                                  : theme.isDark
+                                  ? 'rgba(255,255,255,0.08)'
+                                  : 'rgba(0,0,0,0.06)',
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.presetChipText,
+                              {
+                                color:
+                                  timerMin === String(m) &&
+                                  (timerSec === '0' || timerSec === '')
+                                    ? theme.accentInk
+                                    : theme.text,
+                              },
+                            ]}
+                          >
+                            {m} dk
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+                {goalType === 'reps' && (
+                  <View
+                    style={[
+                      styles.goalConfigBox,
+                      {
+                        backgroundColor: theme.isDark
+                          ? 'rgba(255,255,255,0.04)'
+                          : 'rgba(0,0,0,0.03)',
+                        borderColor: theme.isDark
+                          ? 'rgba(255,255,255,0.12)'
+                          : 'rgba(0,0,0,0.1)',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.subInputLabel, { color: theme.muted }]}
+                    >
+                      Hedef Tekrar Sayısı
+                    </Text>
+                    <TextInput
+                      value={goalTargetStr}
+                      onChangeText={(v) =>
+                        setGoalTargetStr(v.replace(/[^0-9]/g, ''))
+                      }
+                      keyboardType="number-pad"
+                      maxLength={5}
+                      placeholder="Örn. 30"
+                      placeholderTextColor={theme.muted}
+                      style={[
+                        styles.smallInput,
+                        {
+                          color: theme.text,
+                          borderColor: theme.isDark
+                            ? 'rgba(255,255,255,0.18)'
+                            : 'rgba(0,0,0,0.15)',
+                        },
+                      ]}
+                    />
+                    <View style={styles.presetChipsRow}>
+                      {[10, 15, 20, 30, 50, 100].map((r) => (
+                        <TouchableOpacity
+                          key={r}
+                          onPress={() => {
+                            Haptics.selectionAsync().catch(() => {});
+                            setGoalTargetStr(String(r));
+                          }}
+                          style={[
+                            styles.presetChip,
+                            {
+                              backgroundColor:
+                                goalTargetStr === String(r)
+                                  ? theme.accent
+                                  : theme.isDark
+                                  ? 'rgba(255,255,255,0.08)'
+                                  : 'rgba(0,0,0,0.06)',
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.presetChipText,
+                              {
+                                color:
+                                  goalTargetStr === String(r)
+                                    ? theme.accentInk
+                                    : theme.text,
+                              },
+                            ]}
+                          >
+                            {r} tekrar
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+                {goalType === 'amount' && (
+                  <View
+                    style={[
+                      styles.goalConfigBox,
+                      {
+                        backgroundColor: theme.isDark
+                          ? 'rgba(255,255,255,0.04)'
+                          : 'rgba(0,0,0,0.03)',
+                        borderColor: theme.isDark
+                          ? 'rgba(255,255,255,0.12)'
+                          : 'rgba(0,0,0,0.1)',
+                      },
+                    ]}
+                  >
+                    <View style={styles.inlineInputsRow}>
+                      <View style={{ flex: 1.2 }}>
+                        <Text
+                          style={[styles.subInputLabel, { color: theme.muted }]}
+                        >
+                          Hedef Miktar
+                        </Text>
+                        <TextInput
+                          value={goalTargetStr}
+                          onChangeText={(v) =>
+                            setGoalTargetStr(v.replace(/[^0-9.,]/g, ''))
+                          }
+                          keyboardType="numeric"
+                          maxLength={7}
+                          placeholder="Örn. 2000"
+                          placeholderTextColor={theme.muted}
+                          style={[
+                            styles.smallInput,
+                            {
+                              color: theme.text,
+                              borderColor: theme.isDark
+                                ? 'rgba(255,255,255,0.18)'
+                                : 'rgba(0,0,0,0.15)',
+                            },
+                          ]}
+                        />
+                      </View>
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[styles.subInputLabel, { color: theme.muted }]}
+                        >
+                          Birim
+                        </Text>
+                        <TextInput
+                          value={goalUnit}
+                          onChangeText={setGoalUnit}
+                          maxLength={15}
+                          placeholder="ml, g, kcal..."
+                          placeholderTextColor={theme.muted}
+                          style={[
+                            styles.smallInput,
+                            {
+                              color: theme.text,
+                              borderColor: theme.isDark
+                                ? 'rgba(255,255,255,0.18)'
+                                : 'rgba(0,0,0,0.15)',
+                            },
+                          ]}
+                        />
+                      </View>
+                    </View>
+                    <View style={styles.presetChipsRow}>
+                      {[
+                        'ml',
+                        'L',
+                        'g',
+                        'kcal',
+                        'adım',
+                        'bardak',
+                        'sayfa',
+                        'adet',
+                      ].map((u) => (
+                        <TouchableOpacity
+                          key={u}
+                          onPress={() => {
+                            Haptics.selectionAsync().catch(() => {});
+                            setGoalUnit(u);
+                          }}
+                          style={[
+                            styles.presetChip,
+                            {
+                              backgroundColor:
+                                goalUnit === u
+                                  ? theme.accent
+                                  : theme.isDark
+                                  ? 'rgba(255,255,255,0.08)'
+                                  : 'rgba(0,0,0,0.06)',
+                            },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.presetChipText,
+                              {
+                                color:
+                                  goalUnit === u ? theme.accentInk : theme.text,
+                              },
+                            ]}
+                          >
+                            {u}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                )}
+
+                {/* Alt Başlıklar (Ana sayfada önizlemesi yok, sadece basılı tutup içine girince görünür) */}
+                <Text
+                  style={[
+                    styles.inputLabel,
+                    { color: theme.text, marginTop: 4 },
+                  ]}
+                >
+                  Alt başlıklar{' '}
+                  <Text style={{ fontWeight: '400', color: theme.muted }}>
+                    ({editorSubtasks.length})
+                  </Text>
+                </Text>
+
+                {editorSubtasks.length > 0 && (
+                  <View style={styles.subtasksList}>
+                    {editorSubtasks.map((st) => (
+                      <View
+                        key={st.id}
+                        style={[
+                          styles.subtaskItem,
+                          {
+                            backgroundColor: theme.isDark
+                              ? 'rgba(255,255,255,0.05)'
+                              : 'rgba(0,0,0,0.035)',
+                            borderColor: theme.isDark
+                              ? 'rgba(255,255,255,0.12)'
+                              : 'rgba(0,0,0,0.09)',
+                          },
+                        ]}
+                      >
+                        <TouchableOpacity
+                          onPress={() => handleToggleSubtask(st.id)}
+                          style={[
+                            styles.subtaskCheck,
+                            {
+                              borderColor: st.done
+                                ? MARK_COLORS.green
+                                : theme.muted,
+                              backgroundColor: st.done
+                                ? MARK_COLORS.green
+                                : 'transparent',
+                            },
+                          ]}
+                        >
+                          {st.done && (
+                            <Text style={styles.subtaskCheckIcon}>✓</Text>
+                          )}
+                        </TouchableOpacity>
+                        <Text
+                          onPress={() => handleToggleSubtask(st.id)}
+                          style={[
+                            styles.subtaskTitle,
+                            {
+                              color: st.done ? theme.muted : theme.text,
+                              textDecorationLine: st.done
+                                ? 'line-through'
+                                : 'none',
+                            },
+                          ]}
+                        >
+                          {st.title}
+                        </Text>
+                        <TouchableOpacity
+                          onPress={() => handleRemoveSubtask(st.id)}
+                          style={styles.subtaskRemoveBtn}
+                        >
+                          <Text style={{ color: theme.muted, fontSize: 14 }}>
+                            ✕
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                <View style={styles.subtaskAddRow}>
+                  <TextInput
+                    value={newSubtaskTitle}
+                    onChangeText={setNewSubtaskTitle}
+                    maxLength={80}
+                    placeholder="Alt başlık ekle..."
+                    placeholderTextColor={theme.muted}
+                    onSubmitEditing={handleAddSubtask}
+                    style={[
+                      styles.smallInput,
+                      {
+                        flex: 1,
+                        marginBottom: 0,
+                        color: theme.text,
+                        backgroundColor: theme.isDark
+                          ? 'rgba(255,255,255,0.06)'
+                          : 'rgba(0,0,0,0.04)',
+                        borderColor: theme.isDark
+                          ? 'rgba(255,255,255,0.18)'
+                          : 'rgba(0,0,0,0.15)',
+                      },
+                    ]}
+                  />
+                  <TouchableOpacity
+                    onPress={handleAddSubtask}
+                    style={[
+                      styles.subtaskAddBtn,
+                      { backgroundColor: theme.accent },
                     ]}
                   >
                     <Text
                       style={[
-                        styles.dangerBtnText,
-                        confirmDelete && { color: '#ffffff' },
+                        styles.primaryBtnText,
+                        { color: theme.accentInk },
                       ]}
                     >
-                      {confirmDelete ? 'Emin misin? Sil' : 'Sil'}
+                      ＋ Ekle
                     </Text>
                   </TouchableOpacity>
-                )}
+                </View>
 
-                <View style={{ flex: 1 }} />
+                <View style={styles.editorActions}>
+                  {editingHabit && (
+                    <TouchableOpacity
+                      onPress={handleDeleteHabit}
+                      style={[
+                        styles.dangerBtn,
+                        confirmDelete && styles.dangerBtnConfirm,
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.dangerBtnText,
+                          confirmDelete && { color: '#ffffff' },
+                        ]}
+                      >
+                        {confirmDelete ? 'Emin misin? Sil' : 'Sil'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
 
-                <TouchableOpacity
-                  onPress={() => setEditorOpen(false)}
-                  style={[
-                    styles.ghostBtn,
-                    {
-                      borderColor: theme.isDark
-                        ? 'rgba(255,255,255,0.25)'
-                        : 'rgba(0,0,0,0.22)',
-                    },
-                  ]}
-                >
-                  <Text style={[styles.ghostBtnText, { color: theme.text }]}>
-                    Vazgeç
-                  </Text>
-                </TouchableOpacity>
+                  <View style={{ flex: 1 }} />
 
-                <TouchableOpacity
-                  onPress={saveEditor}
-                  style={[
-                    styles.primaryBtn,
-                    { backgroundColor: theme.accent },
-                  ]}
-                >
-                  <Text
-                    style={[styles.primaryBtnText, { color: theme.accentInk }]}
+                  <TouchableOpacity
+                    onPress={() => setEditorOpen(false)}
+                    style={[
+                      styles.ghostBtn,
+                      {
+                        borderColor: theme.isDark
+                          ? 'rgba(255,255,255,0.25)'
+                          : 'rgba(0,0,0,0.22)',
+                      },
+                    ]}
                   >
-                    Kaydet
-                  </Text>
-                </TouchableOpacity>
-              </View>
+                    <Text style={[styles.ghostBtnText, { color: theme.text }]}>
+                      Vazgeç
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={saveEditor}
+                    style={[
+                      styles.primaryBtn,
+                      { backgroundColor: theme.accent },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.primaryBtnText,
+                        { color: theme.accentInk },
+                      ]}
+                    >
+                      Kaydet
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </ScrollView>
+            </Pressable>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Container'a Dokununca Açılan Sayaç / Miktar / Tekrar Arayüzü */}
+      <Modal
+        visible={!!actionHabit && !!actionHabit.goal}
+        transparent
+        animationType="fade"
+        onRequestClose={closeActionModal}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalBackdrop}
+        >
+          <Pressable
+            style={styles.modalBackdropInner}
+            onPress={closeActionModal}
+          >
+            <Pressable
+              style={[
+                styles.editorCard,
+                {
+                  backgroundColor: theme.surface,
+                  borderRadius: theme.radius,
+                },
+              ]}
+              onPress={(e) => e.stopPropagation()}
+            >
+              {actionHabit && actionHabit.goal && (
+                <>
+                  <View style={styles.actionModalHeader}>
+                    <View style={{ flex: 1 }}>
+                      <Text
+                        style={[
+                          styles.editorTitle,
+                          {
+                            color: theme.text,
+                            marginBottom: 2,
+                            fontStyle: theme.headItalic ? 'italic' : 'normal',
+                          },
+                        ]}
+                      >
+                        {actionHabit.name}
+                      </Text>
+                      {!!actionHabit.detail && (
+                        <Text
+                          style={[styles.cardDetail, { color: theme.muted }]}
+                        >
+                          {actionHabit.detail}
+                        </Text>
+                      )}
+                    </View>
+                    <TouchableOpacity
+                      onPress={() => {
+                        const h = actionHabit;
+                        closeActionModal();
+                        openEditor(h);
+                      }}
+                      style={[
+                        styles.iconBtn,
+                        {
+                          backgroundColor: theme.isDark
+                            ? 'rgba(255,255,255,0.08)'
+                            : 'rgba(0,0,0,0.05)',
+                          borderColor: 'transparent',
+                        },
+                      ]}
+                    >
+                      <Text style={{ color: theme.muted, fontSize: 16 }}>
+                        ✎
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {actionHabit.goal.type === 'timer' ? (
+                    (() => {
+                      const targetSec = actionHabit.goal.target || 1;
+                      const elapsedSec = Math.max(
+                        0,
+                        targetSec - timerRemaining
+                      );
+                      const timerPct = Math.min(
+                        100,
+                        Math.round((elapsedSec / targetSec) * 100)
+                      );
+                      const isFinished = timerRemaining <= 0;
+
+                      return (
+                        <View style={styles.timerContainer}>
+                          <Text
+                            style={[
+                              styles.timerBigDigits,
+                              {
+                                color: isFinished
+                                  ? MARK_COLORS.green
+                                  : theme.text,
+                              },
+                            ]}
+                          >
+                            {formatDuration(timerRemaining)}
+                          </Text>
+                          <Text
+                            style={[
+                              styles.timerSubStatus,
+                              { color: theme.muted },
+                            ]}
+                          >
+                            {isFinished
+                              ? '🎉 Süre tamamlandı!'
+                              : timerRunning
+                              ? 'Sayaç çalışıyor...'
+                              : `Hedef süre: ${formatTimerReadable(targetSec)}`}
+                          </Text>
+
+                          <View
+                            style={[
+                              styles.actionProgressBg,
+                              {
+                                backgroundColor: theme.isDark
+                                  ? 'rgba(255,255,255,0.1)'
+                                  : 'rgba(0,0,0,0.08)',
+                              },
+                            ]}
+                          >
+                            <View
+                              style={[
+                                styles.actionProgressFill,
+                                {
+                                  width: `${timerPct}%`,
+                                  backgroundColor: isFinished
+                                    ? MARK_COLORS.green
+                                    : theme.accent,
+                                },
+                              ]}
+                            />
+                          </View>
+
+                          <View style={styles.presetChipsRow}>
+                            {[
+                              { label: '-15 sn', delta: -15 },
+                              { label: '+15 sn', delta: 15 },
+                              { label: '+1 dk', delta: 60 },
+                            ].map((adj) => (
+                              <TouchableOpacity
+                                key={adj.label}
+                                onPress={() => {
+                                  Haptics.selectionAsync().catch(() => {});
+                                  setTimerRemaining((prev) =>
+                                    Math.max(0, prev + adj.delta)
+                                  );
+                                }}
+                                style={[
+                                  styles.presetChip,
+                                  {
+                                    backgroundColor: theme.isDark
+                                      ? 'rgba(255,255,255,0.08)'
+                                      : 'rgba(0,0,0,0.06)',
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.presetChipText,
+                                    { color: theme.text },
+                                  ]}
+                                >
+                                  {adj.label}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+
+                          <View style={styles.timerControlsRow}>
+                            <TouchableOpacity
+                              onPress={() => {
+                                Haptics.impactAsync(
+                                  Haptics.ImpactFeedbackStyle.Medium
+                                ).catch(() => {});
+                                if (timerRemaining <= 0) {
+                                  setTimerRemaining(targetSec);
+                                  setTimerRunning(true);
+                                } else {
+                                  setTimerRunning((r) => !r);
+                                }
+                              }}
+                              style={[
+                                styles.primaryBtn,
+                                styles.timerMainBtn,
+                                { backgroundColor: theme.accent },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.primaryBtnText,
+                                  { color: theme.accentInk, fontSize: 15 },
+                                ]}
+                              >
+                                {timerRunning
+                                  ? '⏸ Duraklat'
+                                  : timerRemaining <= 0
+                                  ? '↺ Tekrar Başlat'
+                                  : timerRemaining < targetSec
+                                  ? '▶ Devam Et'
+                                  : '▶ Başlat'}
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              onPress={() => {
+                                Haptics.selectionAsync().catch(() => {});
+                                setTimerRunning(false);
+                                setTimerRemaining(targetSec);
+                                setProgressAndAutoMark(
+                                  actionHabit,
+                                  today.key,
+                                  0
+                                );
+                              }}
+                              style={[
+                                styles.ghostBtn,
+                                {
+                                  borderColor: theme.isDark
+                                    ? 'rgba(255,255,255,0.22)'
+                                    : 'rgba(0,0,0,0.18)',
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.ghostBtnText,
+                                  { color: theme.text },
+                                ]}
+                              >
+                                ↺ Sıfırla
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+
+                          <View style={styles.actionFooterRow}>
+                            <TouchableOpacity
+                              onPress={() => {
+                                Haptics.notificationAsync(
+                                  Haptics.NotificationFeedbackType.Success
+                                ).catch(() => {});
+                                setTimerRunning(false);
+                                setTimerRemaining(0);
+                                setProgressAndAutoMark(
+                                  actionHabit,
+                                  today.key,
+                                  targetSec
+                                );
+                                closeActionModal();
+                              }}
+                              style={[
+                                styles.completeGoalBtn,
+                                { backgroundColor: MARK_COLORS.green },
+                              ]}
+                            >
+                              <Text style={styles.completeGoalBtnText}>
+                                ✓ Tamamlandı İşaretle
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              onPress={closeActionModal}
+                              style={[
+                                styles.ghostBtn,
+                                {
+                                  borderColor: theme.isDark
+                                    ? 'rgba(255,255,255,0.22)'
+                                    : 'rgba(0,0,0,0.18)',
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.ghostBtnText,
+                                  { color: theme.text },
+                                ]}
+                              >
+                                Kapat
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      );
+                    })()
+                  ) : (
+                    (() => {
+                      const targetVal = actionHabit.goal.target || 1;
+                      const currentVal = getProgress(actionHabit.id, today.key);
+                      const unitText =
+                        actionHabit.goal.type === 'reps'
+                          ? 'tekrar'
+                          : actionHabit.goal.unit || '';
+                      const progPct = Math.min(
+                        100,
+                        Math.round((currentVal / targetVal) * 100)
+                      );
+                      const steps = getQuickSteps(actionHabit.goal);
+
+                      return (
+                        <View style={styles.amountContainer}>
+                          <View style={styles.amountHeaderNums}>
+                            <Text
+                              style={[
+                                styles.amountBigValue,
+                                {
+                                  color:
+                                    currentVal >= targetVal
+                                      ? MARK_COLORS.green
+                                      : theme.text,
+                                },
+                              ]}
+                            >
+                              {currentVal}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.amountTargetText,
+                                { color: theme.muted },
+                              ]}
+                            >
+                              / {targetVal} {unitText} (%{progPct})
+                            </Text>
+                          </View>
+
+                          <View
+                            style={[
+                              styles.actionProgressBg,
+                              {
+                                backgroundColor: theme.isDark
+                                  ? 'rgba(255,255,255,0.1)'
+                                  : 'rgba(0,0,0,0.08)',
+                              },
+                            ]}
+                          >
+                            <View
+                              style={[
+                                styles.actionProgressFill,
+                                {
+                                  width: `${progPct}%`,
+                                  backgroundColor:
+                                    currentVal >= targetVal
+                                      ? MARK_COLORS.green
+                                      : theme.accent,
+                                },
+                              ]}
+                            />
+                          </View>
+
+                          <Text
+                            style={[
+                              styles.subInputLabel,
+                              { color: theme.muted, marginTop: 6 },
+                            ]}
+                          >
+                            Hızlı Ekle / Çıkar
+                          </Text>
+                          <View style={styles.presetChipsRow}>
+                            <TouchableOpacity
+                              onPress={() => {
+                                Haptics.selectionAsync().catch(() => {});
+                                setProgressAndAutoMark(
+                                  actionHabit,
+                                  today.key,
+                                  currentVal - steps[0]
+                                );
+                              }}
+                              style={[
+                                styles.quickStepBtn,
+                                {
+                                  backgroundColor: theme.isDark
+                                    ? 'rgba(255,255,255,0.07)'
+                                    : 'rgba(0,0,0,0.05)',
+                                  borderColor: theme.isDark
+                                    ? 'rgba(255,255,255,0.15)'
+                                    : 'rgba(0,0,0,0.12)',
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.quickStepBtnText,
+                                  { color: theme.text },
+                                ]}
+                              >
+                                -{steps[0]}
+                              </Text>
+                            </TouchableOpacity>
+                            {steps.map((st) => (
+                              <TouchableOpacity
+                                key={st}
+                                onPress={() => {
+                                  Haptics.impactAsync(
+                                    Haptics.ImpactFeedbackStyle.Light
+                                  ).catch(() => {});
+                                  setProgressAndAutoMark(
+                                    actionHabit,
+                                    today.key,
+                                    currentVal + st
+                                  );
+                                }}
+                                style={[
+                                  styles.quickStepBtn,
+                                  {
+                                    backgroundColor: theme.accent,
+                                    borderColor: theme.accent,
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.quickStepBtnText,
+                                    { color: theme.accentInk },
+                                  ]}
+                                >
+                                  +{st} {unitText}
+                                </Text>
+                              </TouchableOpacity>
+                            ))}
+                          </View>
+
+                          <Text
+                            style={[
+                              styles.subInputLabel,
+                              { color: theme.muted, marginTop: 6 },
+                            ]}
+                          >
+                            Özel Miktar Ekle
+                          </Text>
+                          <View style={styles.subtaskAddRow}>
+                            <TextInput
+                              value={customAmountStr}
+                              onChangeText={(v) =>
+                                setCustomAmountStr(v.replace(/[^0-9.,]/g, ''))
+                              }
+                              keyboardType="numeric"
+                              maxLength={7}
+                              placeholder={`Miktar (${unitText})`}
+                              placeholderTextColor={theme.muted}
+                              style={[
+                                styles.smallInput,
+                                {
+                                  flex: 1,
+                                  marginBottom: 0,
+                                  color: theme.text,
+                                  backgroundColor: theme.isDark
+                                    ? 'rgba(255,255,255,0.06)'
+                                    : 'rgba(0,0,0,0.04)',
+                                  borderColor: theme.isDark
+                                    ? 'rgba(255,255,255,0.18)'
+                                    : 'rgba(0,0,0,0.15)',
+                                },
+                              ]}
+                            />
+                            <TouchableOpacity
+                              onPress={() => {
+                                const val =
+                                  parseFloat(
+                                    customAmountStr.replace(',', '.')
+                                  ) || 0;
+                                if (val <= 0) return;
+                                Haptics.impactAsync(
+                                  Haptics.ImpactFeedbackStyle.Light
+                                ).catch(() => {});
+                                setProgressAndAutoMark(
+                                  actionHabit,
+                                  today.key,
+                                  currentVal + val
+                                );
+                                setCustomAmountStr('');
+                              }}
+                              style={[
+                                styles.subtaskAddBtn,
+                                { backgroundColor: theme.accent },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.primaryBtnText,
+                                  { color: theme.accentInk },
+                                ]}
+                              >
+                                ＋ Ekle
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+
+                          <View style={styles.actionFooterRow}>
+                            <TouchableOpacity
+                              onPress={() => {
+                                Haptics.selectionAsync().catch(() => {});
+                                setProgressAndAutoMark(
+                                  actionHabit,
+                                  today.key,
+                                  0
+                                );
+                              }}
+                              style={[
+                                styles.ghostBtn,
+                                {
+                                  borderColor: theme.isDark
+                                    ? 'rgba(255,255,255,0.22)'
+                                    : 'rgba(0,0,0,0.18)',
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.ghostBtnText,
+                                  { color: theme.text },
+                                ]}
+                              >
+                                ↺ Sıfırla
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              onPress={() => {
+                                Haptics.notificationAsync(
+                                  Haptics.NotificationFeedbackType.Success
+                                ).catch(() => {});
+                                setProgressAndAutoMark(
+                                  actionHabit,
+                                  today.key,
+                                  targetVal
+                                );
+                                closeActionModal();
+                              }}
+                              style={[
+                                styles.completeGoalBtn,
+                                { backgroundColor: MARK_COLORS.green },
+                              ]}
+                            >
+                              <Text style={styles.completeGoalBtnText}>
+                                ✓ Hedefi Tamamla
+                              </Text>
+                            </TouchableOpacity>
+
+                            <TouchableOpacity
+                              onPress={closeActionModal}
+                              style={[
+                                styles.ghostBtn,
+                                {
+                                  borderColor: theme.isDark
+                                    ? 'rgba(255,255,255,0.22)'
+                                    : 'rgba(0,0,0,0.18)',
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.ghostBtnText,
+                                  { color: theme.text },
+                                ]}
+                              >
+                                Kapat
+                              </Text>
+                            </TouchableOpacity>
+                          </View>
+                        </View>
+                      );
+                    })()
+                  )}
+                </>
+              )}
             </Pressable>
           </Pressable>
         </KeyboardAvoidingView>
@@ -1495,13 +3391,162 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   topbar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
     paddingVertical: 8,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
   },
+  topbarLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  backToHomeBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 2,
+    paddingRight: 8,
+  },
+  backToHomeArrow: {
+    fontSize: 24,
+    lineHeight: 24,
+    fontWeight: '700',
+  },
   appTitle: {
     fontSize: 16,
     fontWeight: '800',
+  },
+  profileCircleBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileCircleInitials: {
+    fontSize: 13,
+    fontWeight: '800',
+    letterSpacing: 0.4,
+  },
+  profileCircleEmoji: {
+    fontSize: 16,
+  },
+  profileHeaderCard: {
+    alignItems: 'center',
+    paddingVertical: 20,
+    paddingHorizontal: 16,
+    marginBottom: 14,
+  },
+  profileBigAvatar: {
+    width: 74,
+    height: 74,
+    borderRadius: 37,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 10,
+  },
+  profileBigInitials: {
+    fontSize: 26,
+    fontWeight: '800',
+    letterSpacing: 1,
+  },
+  profileBigEmoji: {
+    fontSize: 34,
+  },
+  profileDisplayName: {
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'center',
+  },
+  profileSubtitle: {
+    fontSize: 13,
+    marginTop: 3,
+    textAlign: 'center',
+  },
+  profileStatsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 16,
+    width: '100%',
+  },
+  profileStatBox: {
+    flex: 1,
+    paddingVertical: 10,
+    paddingHorizontal: 8,
+    borderRadius: 12,
+    alignItems: 'center',
+  },
+  profileStatVal: {
+    fontSize: 16,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  profileStatLbl: {
+    fontSize: 11.5,
+    marginTop: 2,
+    fontWeight: '600',
+    textAlign: 'center',
+  },
+  profileSectionCard: {
+    padding: 16,
+    marginBottom: 14,
+  },
+  profileSectionTitle: {
+    fontSize: 17,
+    fontWeight: '800',
+    marginBottom: 10,
+  },
+  profileSectionDesc: {
+    fontSize: 13,
+    lineHeight: 19,
+    marginBottom: 12,
+  },
+  profileFullBtn: {
+    width: '100%',
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  profileSavedToast: {
+    marginTop: 10,
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    alignItems: 'center',
+  },
+  profileSavedToastText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  backupInfoBox: {
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    gap: 8,
+    marginBottom: 14,
+  },
+  backupInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  backupInfoLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  backupInfoVal: {
+    fontSize: 13,
+    fontWeight: '700',
+    textAlign: 'right',
+    flexShrink: 1,
+  },
+  profileBackupBtns: {
+    gap: 10,
   },
   bottomTabBar: {
     borderTopWidth: 1,
@@ -1958,6 +4003,220 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    marginTop: 6,
+    marginTop: 12,
+  },
+  goalChip: {
+    paddingHorizontal: 8,
+    paddingVertical: 2.5,
+    borderRadius: 99,
+    borderWidth: 1,
+  },
+  goalChipText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  goalTypeRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginBottom: 12,
+  },
+  goalTypeBtn: {
+    flex: 1,
+    minWidth: 74,
+    paddingVertical: 9,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  goalTypeBtnText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+  },
+  goalConfigBox: {
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 14,
+  },
+  inlineInputsRow: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  subInputLabel: {
+    fontSize: 12,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  smallInput: {
+    paddingVertical: 9,
+    paddingHorizontal: 12,
+    borderWidth: 1.5,
+    borderRadius: 10,
+    fontSize: 15,
+    marginBottom: 10,
+  },
+  presetChipsRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 2,
+  },
+  presetChip: {
+    paddingVertical: 6,
+    paddingHorizontal: 11,
+    borderRadius: 99,
+  },
+  presetChipText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+  },
+  subtasksList: {
+    gap: 6,
+    marginBottom: 10,
+  },
+  subtaskItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+  },
+  subtaskCheck: {
+    width: 22,
+    height: 22,
+    borderRadius: 6,
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  subtaskCheckIcon: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  subtaskTitle: {
+    flex: 1,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  subtaskRemoveBtn: {
+    padding: 4,
+  },
+  subtaskAddRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 12,
+  },
+  subtaskAddBtn: {
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionModalHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 10,
+  },
+  timerContainer: {
+    alignItems: 'center',
+    paddingTop: 6,
+  },
+  timerBigDigits: {
+    fontSize: 48,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+    letterSpacing: 1,
+  },
+  timerSubStatus: {
+    fontSize: 13.5,
+    fontWeight: '600',
+    marginTop: 2,
+    marginBottom: 12,
+  },
+  actionProgressBg: {
+    width: '100%',
+    height: 10,
+    borderRadius: 99,
+    overflow: 'hidden',
+    marginBottom: 14,
+  },
+  actionProgressFill: {
+    height: '100%',
+    borderRadius: 99,
+  },
+  timerControlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 14,
+    width: '100%',
+  },
+  timerMainBtn: {
+    flex: 1,
+    paddingVertical: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  actionFooterRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 16,
+    width: '100%',
+  },
+  completeGoalBtn: {
+    flex: 1,
+    borderRadius: 999,
+    paddingVertical: 9,
+    paddingHorizontal: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  completeGoalBtnText: {
+    color: '#ffffff',
+    fontSize: 13.5,
+    fontWeight: '700',
+  },
+  amountContainer: {
+    paddingTop: 4,
+  },
+  amountHeaderNums: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'center',
+    gap: 6,
+    marginBottom: 10,
+  },
+  amountBigValue: {
+    fontSize: 38,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  amountTargetText: {
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  quickStepBtn: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1.5,
+  },
+  quickStepBtnText: {
+    fontSize: 13.5,
+    fontWeight: '700',
   },
 });

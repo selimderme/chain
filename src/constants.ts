@@ -38,11 +38,34 @@ export interface TabConfig {
   theme: TabTheme;
 }
 
+export type GoalType = 'none' | 'timer' | 'reps' | 'amount';
+
+export interface HabitGoal {
+  type: GoalType;
+  target: number; // timer: saniye, reps: tekrar sayısı, amount: hedef miktar
+  unit?: string; // örn: 'ml', 'g', 'kcal', 'adım', 'tekrar'
+}
+
+export interface Subtask {
+  id: string;
+  title: string;
+  done?: boolean;
+}
+
 export interface Habit {
   id: string;
   tab: TabId;
   name: string;
   detail: string;
+  goal?: HabitGoal;
+  subtasks?: Subtask[];
+}
+
+export interface UserProfile {
+  firstName: string;
+  lastName: string;
+  lastBackupAt?: string;
+  lastRestoreAt?: string;
 }
 
 export interface AppDataState {
@@ -50,6 +73,8 @@ export interface AppDataState {
   tab: TabId;
   habits: Habit[];
   marks: Record<string, Record<string, MarkType>>;
+  progress?: Record<string, Record<string, number>>;
+  profile?: UserProfile;
 }
 
 export const MARK_COLORS = {
