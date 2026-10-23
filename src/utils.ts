@@ -1,6 +1,6 @@
 import { MarkType } from './constants';
 
-const TR_MONTHS = [
+export const TR_MONTHS = [
   'Ocak',
   'Şubat',
   'Mart',
@@ -15,7 +15,7 @@ const TR_MONTHS = [
   'Aralık',
 ];
 
-const TR_WEEKDAYS = [
+export const TR_WEEKDAYS = [
   'Pazar',
   'Pazartesi',
   'Salı',
@@ -23,6 +23,16 @@ const TR_WEEKDAYS = [
   'Perşembe',
   'Cuma',
   'Cumartesi',
+];
+
+export const TR_WEEKDAYS_SHORT = [
+  'Pzt',
+  'Sal',
+  'Çar',
+  'Per',
+  'Cum',
+  'Cmt',
+  'Paz',
 ];
 
 export const pad = (n: number): string => String(n).padStart(2, '0');

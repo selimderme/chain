@@ -117,6 +117,8 @@ function save() {
 
 const state = load();
 state.progress ||= {};
+state.tasks ||= [];
+state.section ||= 'rutin';
 state.profile ||= { firstName: '', lastName: '' };
 if (!TABS.some((t) => t.id === state.tab)) state.tab = TABS[0].id;
 save();
@@ -125,6 +127,9 @@ navigator.storage?.persist?.().catch(() => {});
 let view = (() => { const n = new Date(); return { y: n.getFullYear(), m: n.getMonth() }; })();
 
 let reorderMode = false;
+let taskReorderMode = false;
+let taskFilter = 'all';
+let completedExpanded = true;
 let profileOpen = false;
 let profileSavedMsg = false;
 
@@ -180,10 +185,14 @@ function fmtDuration(sec) {
 }
 function fmtTimerReadable(sec) {
   const s = Math.max(0, Math.round(sec));
-  const m = Math.floor(s / 60);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
   const r = s % 60;
-  if (m > 0 && r > 0) return `${m} dk ${r} sn`;
-  return m > 0 ? `${m} dk` : `${r} sn`;
+  const parts = [];
+  if (h > 0) parts.push(`${h} saat`);
+  if (m > 0) parts.push(`${m} dk`);
+  if (r > 0 && h === 0) parts.push(`${r} sn`);
+  return parts.length > 0 ? parts.join(' ') : '0 dk';
 }
 
 /* ───────── Zincir hesapları (sadece yeşil zinciri sürdürür) ───────── */
@@ -209,8 +218,10 @@ function streaks(id, todayKey) {
 
 /* ───────── Çizim ───────── */
 function render() {
-  const tab = TABS.find((t) => t.id === state.tab);
+  const tab = TABS.find((t) => t.id === state.tab) || TABS[0];
+  const activeSec = state.section === 'gorevler' ? 'gorevler' : 'rutin';
   document.body.dataset.tab = tab.id;
+  document.body.dataset.section = !profileOpen && activeSec === 'gorevler' ? 'gorevler' : 'rutin';
   document.querySelector('meta[name="theme-color"]').content = getComputedStyle(document.body).getPropertyValue('--bg').trim() || '#fff';
   const initials = getInitials(state.profile?.firstName, state.profile?.lastName);
   const pBtn = $('#profileBtn');
@@ -218,11 +229,113 @@ function render() {
     pBtn.textContent = initials || '👤';
     pBtn.classList.toggle('active', profileOpen);
   }
+  $('#topModeTabs')?.querySelectorAll('[data-section]').forEach((b) => {
+    b.classList.toggle('active', !profileOpen && b.dataset.section === activeSec);
+  });
+  const activeTasksCount = (state.tasks || []).filter((t) => !t.done).length;
+  const tBadge = $('#tasksBadge');
+  if (tBadge) {
+    tBadge.textContent = String(activeTasksCount);
+    tBadge.hidden = activeTasksCount === 0;
+  }
   const foot = $('#mainFoot');
-  if (foot) foot.hidden = profileOpen;
+  if (foot) foot.hidden = profileOpen || activeSec === 'gorevler';
   renderTabs();
   if (profileOpen) renderProfilePage();
+  else if (activeSec === 'gorevler') renderTasksPanel();
   else renderPanel(tab);
+}
+
+function renderTasksPanel() {
+  const allTasks = state.tasks || [];
+  const activeAll = allTasks.filter((t) => !t.done);
+  const starredCount = activeAll.filter((t) => t.starred).length;
+  const displayed = taskFilter === 'starred' ? activeAll.filter((t) => t.starred) : activeAll;
+  const completed = allTasks.filter((t) => t.done);
+  const pct = allTasks.length ? Math.round((completed.length / allTasks.length) * 100) : 0;
+
+  const activeCards = displayed.map((t, i) => {
+    if (taskReorderMode) {
+      return `<article class="card compact" data-task-item="${t.id}">
+        <span class="handle" style="display:grid;place-items:center">⠿</span>
+        <div class="c-name"><h4>${esc(t.title)}</h4>${t.detail ? `<p class="detail">${esc(t.detail)}</p>` : ''}</div>
+        <button type="button" class="icon-btn" data-task-move="-1" data-id="${t.id}" ${i === 0 ? 'disabled' : ''}>▲</button>
+        <button type="button" class="icon-btn" data-task-move="1" data-id="${t.id}" ${i === displayed.length - 1 ? 'disabled' : ''}>▼</button>
+      </article>`;
+    }
+    const subs = (t.subtasks || []).map((st) => `
+      <button type="button" class="task-sub-row" data-task-sub-toggle="${st.id}" data-task-id="${t.id}">
+        <span class="task-sub-circle ${st.done ? 'done' : ''}">${st.done ? '✓' : ''}</span>
+        <span style="${st.done ? 'text-decoration:line-through;color:var(--muted)' : ''}">${esc(st.title)}</span>
+      </button>
+    `).join('');
+    return `<article class="card" data-task-item="${t.id}" style="padding:12px">
+      <div class="task-row">
+        <button type="button" class="task-circle" data-task-done="${t.id}" aria-label="Görevi tamamla"></button>
+        <div class="task-body" data-task-edit="${t.id}">
+          <h4>${esc(t.title)}</h4>
+          ${t.detail ? `<p class="detail">${esc(t.detail)}</p>` : ''}
+          ${t.dueDate ? `<div style="margin-top:5px"><span class="goal-chip">📅 ${esc(t.dueDate)}</span></div>` : ''}
+        </div>
+        <button type="button" class="task-star-btn ${t.starred ? 'starred' : ''}" data-task-star="${t.id}" aria-label="Yıldızla">${t.starred ? '★' : '☆'}</button>
+      </div>
+      ${subs ? `<div class="task-subtasks">${subs}</div>` : ''}
+    </article>`;
+  }).join('');
+
+  const completedHTML = completed.length ? `
+    <article class="card" style="margin-top:14px;padding:10px 14px">
+      <div style="display:flex;align-items:center;justify-content:space-between">
+        <button type="button" data-toggle-completed style="background:transparent;border:0;font-weight:800;font-size:.92rem;padding:4px 0">
+          ${completedExpanded ? '▾' : '▸'} Tamamlananlar (${completed.length})
+        </button>
+        <button type="button" data-clear-completed style="background:transparent;border:0;color:var(--red);font-weight:700;font-size:.8rem">Tümünü sil</button>
+      </div>
+      ${completedExpanded ? `<div style="margin-top:6px;display:grid;gap:8px">
+        ${completed.map((t) => `
+          <div style="display:flex;align-items:center;gap:12px;padding-top:8px;border-top:1px solid color-mix(in srgb, var(--text) 10%, transparent)">
+            <button type="button" class="task-circle done" data-task-done="${t.id}">✓</button>
+            <div class="task-body" data-task-edit="${t.id}">
+              <h4 style="text-decoration:line-through;color:var(--muted)">${esc(t.title)}</h4>
+              ${t.detail ? `<p class="detail" style="text-decoration:line-through;opacity:.75">${esc(t.detail)}</p>` : ''}
+            </div>
+            <button type="button" data-task-del-single="${t.id}" style="background:transparent;border:0;color:var(--muted);padding:4px 8px">✕</button>
+          </div>
+        `).join('')}
+      </div>` : ''}
+    </article>
+  ` : '';
+
+  $('#panel').innerHTML = `
+    <section class="hero">
+      <span class="emoji" aria-hidden="true">✅</span>
+      <div>
+        <h2>Görevlerim</h2>
+        <p class="motto">Yapılacakları ekle, alt görevlere böl ve tamamla.</p>
+      </div>
+      <div class="progress">
+        <span>Tamamlanan ${completed.length}/${allTasks.length}</span>
+        <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${pct}%"></span></div>
+        <span>%${pct}</span>
+      </div>
+    </section>
+    <div class="toolbar">
+      <button type="button" class="${taskFilter === 'all' ? 'primary' : 'pill'}" data-task-filter="all">Görevlerim (${activeAll.length})</button>
+      <button type="button" class="${taskFilter === 'starred' ? 'primary' : 'pill'}" data-task-filter="starred">★ Yıldızlı (${starredCount})</button>
+      <span class="spacer"></span>
+      ${taskFilter === 'all' && (activeAll.length > 1 || taskReorderMode) ? `<button type="button" class="${taskReorderMode ? 'primary' : 'pill'}" data-task-reorder>${taskReorderMode ? '✓ Bitti' : '⇅ Sırala'}</button>` : ''}
+      ${taskReorderMode ? '' : '<button type="button" class="primary" data-task-add>＋ Madde ekle</button>'}
+    </div>
+    ${taskReorderMode ? '' : `
+      <div class="card task-quick-bar">
+        <span class="task-circle" style="opacity:.7;color:var(--accent)">＋</span>
+        <input type="text" id="quickTaskInput" maxlength="100" placeholder="${taskFilter === 'starred' ? 'Yıldızlı yeni görev ekle...' : 'Yeni bir görev ekle...'}">
+        <button type="button" class="primary" data-quick-task-submit style="padding:6px 12px">Ekle</button>
+      </div>
+    `}
+    <div class="list">${activeCards || `<p class="empty">${taskFilter === 'starred' ? 'Henüz yıldızlı görev yok. Görevlerin yanındaki ☆ simgesine dokunarak önemli görevleri buraya sabitleyebilirsin.' : 'Yapılacak görev yok. Yukarıdan hızlıca yazabilir veya “＋ Madde ekle” ile detaylı görev oluşturabilirsin.'}</p>`}</div>
+    ${completedHTML}
+  `;
 }
 
 function renderProfilePage() {
@@ -270,9 +383,10 @@ function renderProfilePage() {
 
       <article class="card" style="padding:18px">
         <h3 style="margin:0 0 8px;font-size:1.05rem">💾 Yedekleme ve Geri Yükleme</h3>
-        <p class="detail" style="line-height:1.45">Tüm alışkanlıklarınız, zincirleriniz, ilerleme kayıtlarınız ve profil bilgileriniz cihazınızda saklanır. Verilerinizi yedekleyebilir veya istediğiniz zaman yedekten geri yükleyebilirsiniz.</p>
+        <p class="detail" style="line-height:1.45">Tüm alışkanlıklarınız, görevlerinizdeki maddeler, alt görevleriniz, zincirleriniz, ilerleme kayıtlarınız ve profil bilgileriniz cihazınızda saklanır. Verilerinizi yedekleyebilir veya istediğiniz zaman yedekten geri yükleyebilirsiniz.</p>
         <div class="backup-info-box">
           <div class="backup-info-row"><span>Kayıtlı Alışkanlık:</span><b>${state.habits.length} madde (${TABS.length} kategori)</b></div>
+          <div class="backup-info-row"><span>Kayıtlı Görevler:</span><b>${(state.tasks || []).length} madde (${(state.tasks || []).filter((t) => !t.done).length} aktif, ${(state.tasks || []).filter((t) => t.done).length} tamamlanan)</b></div>
           <div class="backup-info-row"><span>Toplam İşaretlenen Gün:</span><b>${totalMarked} kayıt</b></div>
           <div class="backup-info-row"><span>Son Yedekleme:</span><b>${esc(state.profile?.lastBackupAt || 'Henüz yedek alınmadı')}</b></div>
           <div class="backup-info-row"><span>Son Geri Yükleme:</span><b>${esc(state.profile?.lastRestoreAt || 'Henüz geri yükleme yapılmadı')}</b></div>
@@ -406,10 +520,22 @@ function renderPanel(tab) {
 }
 
 /* ───────── Sekme & ay gezinme ───────── */
+$('#topModeTabs')?.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-section]');
+  if (!b) return;
+  profileOpen = false;
+  reorderMode = false;
+  taskReorderMode = false;
+  state.section = b.dataset.section;
+  save();
+  render();
+});
+
 $('#profileBtn')?.addEventListener('click', () => {
   profileSavedMsg = false;
   profileOpen = !profileOpen;
   reorderMode = false;
+  taskReorderMode = false;
   render();
 });
 
@@ -417,10 +543,13 @@ $('#tabs').addEventListener('click', (e) => {
   const b = e.target.closest('[data-tab]');
   if (!b) return;
   const wasProfile = profileOpen;
+  const wasTasks = state.section === 'gorevler';
   profileOpen = false;
-  if (state.tab !== b.dataset.tab || wasProfile) {
+  if (state.tab !== b.dataset.tab || wasProfile || wasTasks) {
+    state.section = 'rutin';
     state.tab = b.dataset.tab;
     reorderMode = false;
+    taskReorderMode = false;
     save();
     render();
     panel.classList.remove('enter');
@@ -569,8 +698,74 @@ panel.addEventListener('click', (e) => {
     if (h?.goal && h.goal.type !== 'none' && h.goal.target > 0) {
       openActionModal(h);
     }
+    return;
+  }
+  // Görevler etkileşimleri
+  const tf = e.target.closest('[data-task-filter]');
+  if (tf) { taskFilter = tf.dataset.taskFilter; render(); return; }
+  if (e.target.closest('[data-task-reorder]')) { taskReorderMode = !taskReorderMode; render(); return; }
+  if (e.target.closest('[data-task-add]')) { openTaskEditor(null); return; }
+  if (e.target.closest('[data-quick-task-submit]')) { quickAddTask(); return; }
+  const tDone = e.target.closest('[data-task-done]');
+  if (tDone) {
+    const t = (state.tasks || []).find((x) => x.id === tDone.dataset.taskDone);
+    if (t) { t.done = !t.done; t.completedAt = t.done ? nowStampTR() : undefined; save(); render(); }
+    return;
+  }
+  const tStar = e.target.closest('[data-task-star]');
+  if (tStar) {
+    const t = (state.tasks || []).find((x) => x.id === tStar.dataset.taskStar);
+    if (t) { t.starred = !t.starred; save(); render(); }
+    return;
+  }
+  const tSub = e.target.closest('[data-task-sub-toggle]');
+  if (tSub) {
+    const t = (state.tasks || []).find((x) => x.id === tSub.dataset.taskId);
+    const st = t?.subtasks?.find((s) => s.id === tSub.dataset.taskSubToggle);
+    if (st) { st.done = !st.done; save(); render(); }
+    return;
+  }
+  const tEdit = e.target.closest('[data-task-edit]');
+  if (tEdit) {
+    const t = (state.tasks || []).find((x) => x.id === tEdit.dataset.taskEdit);
+    if (t) openTaskEditor(t);
+    return;
+  }
+  const tMove = e.target.closest('[data-task-move]');
+  if (tMove) {
+    const all = state.tasks || [];
+    const activeIds = all.filter((x) => !x.done).map((x) => x.id);
+    const i = activeIds.indexOf(tMove.dataset.id);
+    const j = i + Number(tMove.dataset.taskMove);
+    if (i < 0 || j < 0 || j >= activeIds.length) return;
+    [activeIds[i], activeIds[j]] = [activeIds[j], activeIds[i]];
+    const slots = [];
+    all.forEach((x, idx) => { if (!x.done) slots.push(idx); });
+    const byId = new Map(all.map((x) => [x.id, x]));
+    activeIds.forEach((id, k) => { state.tasks[slots[k]] = byId.get(id); });
+    save(); render();
+    return;
+  }
+  if (e.target.closest('[data-toggle-completed]')) { completedExpanded = !completedExpanded; render(); return; }
+  if (e.target.closest('[data-clear-completed]')) { state.tasks = (state.tasks || []).filter((x) => !x.done); save(); render(); return; }
+  const tDelSingle = e.target.closest('[data-task-del-single]');
+  if (tDelSingle) { state.tasks = (state.tasks || []).filter((x) => x.id !== tDelSingle.dataset.taskDelSingle); save(); render(); }
+});
+panel.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && e.target.id === 'quickTaskInput') {
+    e.preventDefault();
+    quickAddTask();
   }
 });
+function quickAddTask() {
+  const inp = $('#quickTaskInput');
+  const val = (inp?.value || '').trim();
+  if (!val) return;
+  state.tasks ||= [];
+  state.tasks.unshift({ id: uid(), title: val, detail: '', dueDate: '', starred: taskFilter === 'starred', done: false, createdAt: nowStampTR(), subtasks: [] });
+  save();
+  render();
+}
 
 /* ───────── Sıralama ───────── */
 const tabHabits = () => state.habits.filter((h) => h.tab === state.tab);
@@ -686,10 +881,10 @@ $('#goalTypeRow').addEventListener('click', (e) => {
   if (b) setEditorGoalType(b.dataset.goalType);
 });
 $('#timerPresets').addEventListener('click', (e) => {
-  const b = e.target.closest('[data-min]');
+  const b = e.target.closest('[data-h]');
   if (!b) return;
-  form.elements.timerMin.value = b.dataset.min;
-  form.elements.timerSec.value = '0';
+  form.elements.timerHour.value = b.dataset.h;
+  form.elements.timerMin.value = b.dataset.m;
 });
 $('#repsPresets').addEventListener('click', (e) => {
   const b = e.target.closest('[data-reps]');
@@ -737,25 +932,26 @@ function openEditor(habit) {
   if (g && g.type !== 'none' && g.target > 0) {
     setEditorGoalType(g.type);
     if (g.type === 'timer') {
-      form.elements.timerMin.value = Math.floor(g.target / 60);
-      form.elements.timerSec.value = g.target % 60;
+      const totalMins = Math.max(1, Math.round(g.target / 60));
+      form.elements.timerHour.value = Math.floor(totalMins / 60);
+      form.elements.timerMin.value = totalMins % 60;
       form.elements.repsTarget.value = '';
       form.elements.amountTarget.value = '';
       form.elements.amountUnit.value = '';
     } else if (g.type === 'reps') {
       form.elements.repsTarget.value = g.target;
+      form.elements.timerHour.value = 0;
       form.elements.timerMin.value = 2;
-      form.elements.timerSec.value = 0;
     } else if (g.type === 'amount') {
       form.elements.amountTarget.value = g.target;
       form.elements.amountUnit.value = g.unit || '';
+      form.elements.timerHour.value = 0;
       form.elements.timerMin.value = 2;
-      form.elements.timerSec.value = 0;
     }
   } else {
     setEditorGoalType('none');
+    form.elements.timerHour.value = 0;
     form.elements.timerMin.value = 2;
-    form.elements.timerSec.value = 0;
     form.elements.repsTarget.value = '';
     form.elements.amountTarget.value = '';
     form.elements.amountUnit.value = '';
@@ -777,9 +973,9 @@ form.addEventListener('submit', (e) => {
   if (!name) return;
   let goal = undefined;
   if (currentGoalType === 'timer') {
+    const h = Math.max(0, parseInt(form.elements.timerHour.value || '0', 10) || 0);
     const m = Math.max(0, parseInt(form.elements.timerMin.value || '0', 10) || 0);
-    const s = Math.max(0, parseInt(form.elements.timerSec.value || '0', 10) || 0);
-    const total = m * 60 + s;
+    const total = h * 3600 + m * 60;
     if (total <= 0) { alert('Lütfen geçerli bir sayaç süresi girin.'); return; }
     goal = { type: 'timer', target: total, unit: 'sn' };
   } else if (currentGoalType === 'reps') {
@@ -1003,11 +1199,427 @@ actionBody.addEventListener('click', (e) => {
 actionModal.addEventListener('close', stopTimerInterval);
 actionModal.addEventListener('click', (e) => { if (e.target === actionModal) { stopTimerInterval(); actionModal.close(); } });
 
+/* ───────── Görev Ekle / Düzenle Penceresi ───────── */
+const taskEditor = $('#taskEditor');
+const taskForm = $('#taskEditorForm');
+const deleteTaskBtn = $('#deleteTaskBtn');
+const taskStarToggleBtn = $('#taskStarToggleBtn');
+const TR_MONTHS_WEB = ['Ocak', 'Şubat', 'Mart', 'Nisan', 'Mayıs', 'Haziran', 'Temmuz', 'Ağustos', 'Eylül', 'Ekim', 'Kasım', 'Aralık'];
+const TR_WEEKDAYS_WEB = ['Pazar', 'Pazartesi', 'Salı', 'Çarşamba', 'Perşembe', 'Cuma', 'Cumartesi'];
+const TR_WEEKDAYS_SHORT_WEB = ['Pzt', 'Sal', 'Çar', 'Per', 'Cum', 'Cmt', 'Paz'];
+const WEB_WHEEL_ITEM_H = 40;
+const firedWebTaskNotifs = new Set();
+
+function requestWebNotifPermission() {
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission().catch(() => {});
+  }
+}
+
+function getTaskDueDateObjWeb(dueStr) {
+  if (!dueStr || !dueStr.trim()) return null;
+  const s = dueStr.trim();
+  const tm = s.match(/(\d{1,2}):(\d{2})/);
+  const h = tm ? Math.min(23, Math.max(0, parseInt(tm[1], 10))) : 9;
+  const min = tm ? Math.min(59, Math.max(0, parseInt(tm[2], 10))) : 0;
+  const n = new Date();
+  for (let i = 0; i < TR_MONTHS_WEB.length; i++) {
+    const rx = new RegExp(`(\\d{1,2})\\s+${TR_MONTHS_WEB[i]}(?:\\s+(\\d{4}))?`, 'i');
+    const m = s.match(rx);
+    if (m) {
+      const y = m[2] ? parseInt(m[2], 10) : n.getFullYear();
+      const d = Math.max(1, Math.min(31, parseInt(m[1], 10)));
+      const dt = new Date(y, i, d, h, min, 0, 0);
+      if (!isNaN(dt.getTime())) return dt;
+    }
+  }
+  return null;
+}
+
+function checkDueTasksWeb() {
+  const nowMs = Date.now();
+  for (const t of state.tasks || []) {
+    if (t.done || !t.dueDate) continue;
+    const dt = getTaskDueDateObjWeb(t.dueDate);
+    if (!dt) continue;
+    const diff = nowMs - dt.getTime();
+    const key = `${t.id}:${t.dueDate}`;
+    if (diff >= 0 && diff < 60000 && !firedWebTaskNotifs.has(key)) {
+      firedWebTaskNotifs.add(key);
+      if ('Notification' in window && Notification.permission === 'granted') {
+        try {
+          new Notification(`🔔 Görev Zamanı: ${t.title}`, {
+            body: t.detail ? `${t.detail} (${t.dueDate})` : `📅 ${t.dueDate} için planlanan görevinizin zamanı geldi!`,
+          });
+        } catch {}
+      }
+    }
+  }
+}
+setInterval(checkDueTasksWeb, 15000);
+
+let editingTask = null;
+let taskStarred = false;
+let taskSubtasks = [];
+let dtPickerState = {
+  viewY: new Date().getFullYear(),
+  viewM: new Date().getMonth(),
+  selY: new Date().getFullYear(),
+  selM: new Date().getMonth(),
+  selD: new Date().getDate(),
+  hasTime: true,
+  h: 12,
+  min: 0,
+};
+
+function formatTaskDueWeb(y, m, d, hasTime, h, min) {
+  const datePart = `${d} ${TR_MONTHS_WEB[m]} ${y}`;
+  return hasTime ? `${datePart} · ${pad(h)}:${pad(min)}` : datePart;
+}
+
+function parseTaskDueWeb(dueStr) {
+  const n = new Date();
+  const def = { y: n.getFullYear(), m: n.getMonth(), d: n.getDate(), hasTime: true, h: 12, min: 0 };
+  if (!dueStr || !dueStr.trim()) return def;
+  const s = dueStr.trim();
+  const tm = s.match(/(\d{1,2}):(\d{2})/);
+  const hasTime = !!tm;
+  const h = tm ? Math.min(23, Math.max(0, parseInt(tm[1], 10))) : 12;
+  const min = tm ? Math.min(59, Math.max(0, parseInt(tm[2], 10))) : 0;
+  for (let i = 0; i < TR_MONTHS_WEB.length; i++) {
+    const rx = new RegExp(`(\\d{1,2})\\s+${TR_MONTHS_WEB[i]}(?:\\s+(\\d{4}))?`, 'i');
+    const m = s.match(rx);
+    if (m) {
+      return { y: m[2] ? parseInt(m[2], 10) : n.getFullYear(), m: i, d: Math.max(1, Math.min(31, parseInt(m[1], 10))), hasTime, h, min };
+    }
+  }
+  return { ...def, hasTime, h, min };
+}
+
+function updateTaskDueUI(val) {
+  const v = (val || '').trim();
+  if (taskForm?.elements?.taskDueDate) taskForm.elements.taskDueDate.value = v;
+  const lbl = $('#taskDueDateLabel');
+  const btn = $('#openTaskDatePickerBtn');
+  const badge = $('#taskDueDateActionBadge');
+  const clr = $('#clearTaskDueDateBtn');
+  if (lbl) {
+    lbl.textContent = v || 'Tarih ve saat seçmek için dokun...';
+    lbl.classList.toggle('muted', !v);
+  }
+  if (btn) btn.classList.toggle('has-value', !!v);
+  if (badge) badge.textContent = v ? 'Değiştir' : '🕒 Seç';
+  if (clr) clr.hidden = !v;
+}
+
+function showTaskDatePicker(open) {
+  const mainV = $('#taskEditorMainView');
+  const pickV = $('#taskDatePickerView');
+  if (mainV) mainV.hidden = open;
+  if (pickV) pickV.hidden = !open;
+  if (open) renderTaskDatePickerBody();
+}
+
+function updateDatePickerPreviewText() {
+  const banner = $('#dtPreviewBanner');
+  if (!banner) return;
+  const { selY, selM, selD, hasTime, h, min } = dtPickerState;
+  const wdName = TR_WEEKDAYS_WEB[new Date(selY, selM, selD).getDay()];
+  const previewStr = `${formatTaskDueWeb(selY, selM, selD, hasTime, h, min)} (${wdName})`;
+  banner.textContent = `🔔 ${previewStr}`;
+}
+
+function syncWheelActiveClasses(wheelEl, selectedVal) {
+  if (!wheelEl) return;
+  wheelEl.querySelectorAll('.dt-wheel-item').forEach((btn) => {
+    const val = Number(btn.dataset.val);
+    btn.classList.toggle('active', val === selectedVal);
+  });
+}
+
+function renderTaskDatePickerBody() {
+  const body = $('#taskDatePickerBody');
+  if (!body) return;
+  const { viewY, viewM, selY, selM, selD, hasTime, h, min } = dtPickerState;
+  const pDim = daysInMonth(viewY, viewM);
+  const firstOff = (new Date(viewY, viewM, 1).getDay() + 6) % 7;
+  const { now } = todayInfo();
+  let cellsHTML = '';
+  for (let i = 0; i < firstOff; i++) cellsHTML += `<span></span>`;
+  for (let d = 1; d <= pDim; d++) {
+    const isSel = selY === viewY && selM === viewM && selD === d;
+    const isTod = now.getFullYear() === viewY && now.getMonth() === viewM && now.getDate() === d;
+    cellsHTML += `<button type="button" class="dt-day-btn ${isSel ? 'selected' : ''} ${isTod && !isSel ? 'today' : ''}" data-dt-day="${d}">${d}</button>`;
+  }
+  const wdName = TR_WEEKDAYS_WEB[new Date(selY, selM, selD).getDay()];
+  const previewStr = `${formatTaskDueWeb(selY, selM, selD, hasTime, h, min)} (${wdName})`;
+
+  let hoursHTML = '';
+  for (let i = 0; i < 24; i++) {
+    hoursHTML += `<button type="button" class="dt-wheel-item ${i === h ? 'active' : ''}" data-wheel-h="${i}" data-val="${i}">${pad(i)}</button>`;
+  }
+  let minsHTML = '';
+  for (let i = 0; i < 60; i++) {
+    minsHTML += `<button type="button" class="dt-wheel-item ${i === min ? 'active' : ''}" data-wheel-m="${i}" data-val="${i}">${pad(i)}</button>`;
+  }
+
+  body.innerHTML = `
+    <div class="dt-box">
+      <div class="dt-cal-head">
+        <button type="button" class="dt-cal-nav" data-dt-month="-1" aria-label="Önceki ay">‹</button>
+        <b>${TR_MONTHS_WEB[viewM]} ${viewY}</b>
+        <button type="button" class="dt-cal-nav" data-dt-month="1" aria-label="Sonraki ay">›</button>
+      </div>
+      <div class="dt-weekdays">${TR_WEEKDAYS_SHORT_WEB.map((w) => `<span>${w}</span>`).join('')}</div>
+      <div class="dt-days-grid">${cellsHTML}</div>
+    </div>
+
+    <div class="dt-box">
+      <div class="dt-time-head">
+        <b style="font-size:.9rem">🕒 Saat Seçimi</b>
+        <button type="button" class="chip ${hasTime ? 'active' : ''}" data-dt-toggle-time style="border:1px solid ${hasTime ? '#FF0000' : '#950101'}">
+          ${hasTime ? '✓ Saat Açık' : 'Saat Kapalı'}
+        </button>
+      </div>
+      ${hasTime ? `
+        <div class="dt-wheel-row">
+          <div class="dt-wheel-col">
+            <small>SAAT</small>
+            <div class="dt-wheel-box">
+              <div class="dt-wheel-highlight"></div>
+              <div class="dt-wheel-scroll" id="dtHourWheel">${hoursHTML}</div>
+            </div>
+          </div>
+          <b class="dt-wheel-colon">:</b>
+          <div class="dt-wheel-col">
+            <small>DAKİKA</small>
+            <div class="dt-wheel-box">
+              <div class="dt-wheel-highlight"></div>
+              <div class="dt-wheel-scroll" id="dtMinWheel">${minsHTML}</div>
+            </div>
+          </div>
+        </div>
+      ` : ''}
+    </div>
+
+    <div class="dt-preview-banner" id="dtPreviewBanner">🔔 ${esc(previewStr)}</div>
+  `;
+
+  if (hasTime) {
+    const hWheel = $('#dtHourWheel');
+    const mWheel = $('#dtMinWheel');
+    if (hWheel) {
+      hWheel.scrollTop = h * WEB_WHEEL_ITEM_H;
+      hWheel.addEventListener('scroll', () => {
+        const idx = Math.max(0, Math.min(23, Math.round(hWheel.scrollTop / WEB_WHEEL_ITEM_H)));
+        if (idx !== dtPickerState.h) {
+          dtPickerState.h = idx;
+          syncWheelActiveClasses(hWheel, idx);
+          updateDatePickerPreviewText();
+        }
+      }, { passive: true });
+    }
+    if (mWheel) {
+      mWheel.scrollTop = min * WEB_WHEEL_ITEM_H;
+      mWheel.addEventListener('scroll', () => {
+        const idx = Math.max(0, Math.min(59, Math.round(mWheel.scrollTop / WEB_WHEEL_ITEM_H)));
+        if (idx !== dtPickerState.min) {
+          dtPickerState.min = idx;
+          syncWheelActiveClasses(mWheel, idx);
+          updateDatePickerPreviewText();
+        }
+      }, { passive: true });
+    }
+  }
+}
+
+$('#openTaskDatePickerBtn')?.addEventListener('click', () => {
+  const p = parseTaskDueWeb(taskForm?.elements?.taskDueDate?.value || '');
+  dtPickerState = { viewY: p.y, viewM: p.m, selY: p.y, selM: p.m, selD: p.d, hasTime: p.hasTime, h: p.h, min: p.min };
+  showTaskDatePicker(true);
+});
+$('#clearTaskDueDateBtn')?.addEventListener('click', () => updateTaskDueUI(''));
+$('#closeDatePickerBackBtn')?.addEventListener('click', () => showTaskDatePicker(false));
+$('#cancelDatePickerBtn')?.addEventListener('click', () => showTaskDatePicker(false));
+$('#clearDatePickerBtn')?.addEventListener('click', () => {
+  updateTaskDueUI('');
+  showTaskDatePicker(false);
+});
+$('#applyDatePickerBtn')?.addEventListener('click', () => {
+  requestWebNotifPermission();
+  const { selY, selM, selD, hasTime, h, min } = dtPickerState;
+  updateTaskDueUI(formatTaskDueWeb(selY, selM, selD, hasTime, h, min));
+  showTaskDatePicker(false);
+});
+$('#taskDatePickerBody')?.addEventListener('click', (e) => {
+  const mBtn = e.target.closest('[data-dt-month]');
+  if (mBtn) {
+    const d = new Date(dtPickerState.viewY, dtPickerState.viewM + Number(mBtn.dataset.dtMonth), 1);
+    dtPickerState.viewY = d.getFullYear();
+    dtPickerState.viewM = d.getMonth();
+    renderTaskDatePickerBody();
+    return;
+  }
+  const dBtn = e.target.closest('[data-dt-day]');
+  if (dBtn) {
+    dtPickerState.selY = dtPickerState.viewY;
+    dtPickerState.selM = dtPickerState.viewM;
+    dtPickerState.selD = Number(dBtn.dataset.dtDay);
+    renderTaskDatePickerBody();
+    return;
+  }
+  if (e.target.closest('[data-dt-toggle-time]')) {
+    dtPickerState.hasTime = !dtPickerState.hasTime;
+    renderTaskDatePickerBody();
+    return;
+  }
+  const whBtn = e.target.closest('[data-wheel-h]');
+  if (whBtn) {
+    const val = Number(whBtn.dataset.wheelH);
+    dtPickerState.h = val;
+    const hWheel = $('#dtHourWheel');
+    if (hWheel) hWheel.scrollTo({ top: val * WEB_WHEEL_ITEM_H, behavior: 'smooth' });
+    syncWheelActiveClasses(hWheel, val);
+    updateDatePickerPreviewText();
+    return;
+  }
+  const wmBtn = e.target.closest('[data-wheel-m]');
+  if (wmBtn) {
+    const val = Number(wmBtn.dataset.wheelM);
+    dtPickerState.min = val;
+    const mWheel = $('#dtMinWheel');
+    if (mWheel) mWheel.scrollTo({ top: val * WEB_WHEEL_ITEM_H, behavior: 'smooth' });
+    syncWheelActiveClasses(mWheel, val);
+    updateDatePickerPreviewText();
+  }
+});
+
+function updateTaskStarBtn() {
+  if (!taskStarToggleBtn) return;
+  taskStarToggleBtn.textContent = taskStarred ? '★ Önemli' : '☆ Yıldızla';
+  taskStarToggleBtn.classList.toggle('active', taskStarred);
+}
+taskStarToggleBtn?.addEventListener('click', () => {
+  taskStarred = !taskStarred;
+  updateTaskStarBtn();
+});
+function renderTaskEditorSubtasks() {
+  if (!$('#taskSubtaskCount')) return;
+  $('#taskSubtaskCount').textContent = `(${taskSubtasks.length})`;
+  $('#taskSubtasksList').innerHTML = taskSubtasks.map((st) => `
+    <div class="subtask-item ${st.done ? 'done' : ''}" data-tsub-id="${st.id}">
+      <input type="checkbox" data-tsub-toggle="${st.id}" ${st.done ? 'checked' : ''}>
+      <span>${esc(st.title)}</span>
+      <button type="button" class="subtask-del" data-tsub-del="${st.id}" aria-label="Sil">✕</button>
+    </div>
+  `).join('');
+}
+function addTaskSubtaskFromInput() {
+  const inp = $('#newTaskSubtaskInput');
+  const val = (inp?.value || '').trim();
+  if (!val) return;
+  taskSubtasks.push({ id: uid(), title: val, done: false });
+  inp.value = '';
+  if (editingTask) { editingTask.subtasks = [...taskSubtasks]; save(); }
+  renderTaskEditorSubtasks();
+}
+$('#addTaskSubtaskBtn')?.addEventListener('click', addTaskSubtaskFromInput);
+$('#newTaskSubtaskInput')?.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') { e.preventDefault(); addTaskSubtaskFromInput(); }
+});
+$('#taskSubtasksList')?.addEventListener('click', (e) => {
+  const tog = e.target.closest('[data-tsub-toggle]');
+  if (tog) {
+    const st = taskSubtasks.find((x) => x.id === tog.dataset.tsubToggle);
+    if (st) { st.done = tog.checked; if (editingTask) { editingTask.subtasks = [...taskSubtasks]; save(); } renderTaskEditorSubtasks(); }
+    return;
+  }
+  const del = e.target.closest('[data-tsub-del]');
+  if (del) {
+    taskSubtasks = taskSubtasks.filter((x) => x.id !== del.dataset.tsubDel);
+    if (editingTask) { editingTask.subtasks = [...taskSubtasks]; save(); }
+    renderTaskEditorSubtasks();
+  }
+});
+
+function openTaskEditor(task) {
+  if (!taskEditor || !taskForm) return;
+  editingTask = task;
+  showTaskDatePicker(false);
+  $('#taskEditorTitle').textContent = task ? 'Görevi düzenle' : 'Yeni görev';
+  taskForm.elements.taskTitle.value = task?.title ?? '';
+  taskForm.elements.taskDetail.value = task?.detail ?? '';
+  updateTaskDueUI(task?.dueDate ?? '');
+  taskStarred = task ? !!task.starred : taskFilter === 'starred';
+  updateTaskStarBtn();
+  taskSubtasks = task?.subtasks ? task.subtasks.map((s) => ({ ...s })) : [];
+  $('#newTaskSubtaskInput').value = '';
+  renderTaskEditorSubtasks();
+  deleteTaskBtn.hidden = !task;
+  deleteTaskBtn.classList.remove('confirm');
+  deleteTaskBtn.textContent = 'Sil';
+  taskEditor.showModal();
+  taskForm.elements.taskTitle.focus();
+}
+
+taskForm?.addEventListener('submit', (e) => {
+  e.preventDefault();
+  const title = taskForm.elements.taskTitle.value.trim();
+  const detail = taskForm.elements.taskDetail.value.trim();
+  const dueDate = taskForm.elements.taskDueDate.value.trim();
+  if (!title) return;
+  const pendingSub = ($('#newTaskSubtaskInput')?.value || '').trim();
+  if (pendingSub) taskSubtasks.push({ id: uid(), title: pendingSub, done: false });
+  state.tasks ||= [];
+  if (editingTask) {
+    editingTask.title = title;
+    editingTask.detail = detail;
+    editingTask.dueDate = dueDate;
+    editingTask.starred = taskStarred;
+    editingTask.subtasks = [...taskSubtasks];
+  } else {
+    state.tasks.unshift({
+      id: uid(),
+      title,
+      detail,
+      dueDate,
+      starred: taskStarred,
+      done: false,
+      createdAt: nowStampTR(),
+      subtasks: [...taskSubtasks],
+    });
+  }
+  save();
+  taskEditor.close();
+  render();
+});
+$('#cancelTaskBtn')?.addEventListener('click', () => taskEditor.close());
+deleteTaskBtn?.addEventListener('click', () => {
+  if (!deleteTaskBtn.classList.contains('confirm')) {
+    deleteTaskBtn.classList.add('confirm');
+    deleteTaskBtn.textContent = 'Emin misin? Sil';
+    return;
+  }
+  state.tasks = (state.tasks || []).filter((t) => t !== editingTask);
+  save();
+  taskEditor.close();
+  render();
+});
+taskEditor?.addEventListener('click', (e) => { if (e.target === taskEditor) taskEditor.close(); });
+
 /* ───────── Yedekle / geri yükle ───────── */
 function exportBackup() {
+  state.tasks ||= [];
   state.profile = { ...(state.profile || { firstName: '', lastName: '' }), lastBackupAt: nowStampTR() };
   save();
-  const blob = new Blob([JSON.stringify(state, null, 2)], { type: 'application/json' });
+  const exportPayload = {
+    ...state,
+    habits: state.habits || [],
+    marks: state.marks || {},
+    progress: state.progress || {},
+    tasks: state.tasks || [],
+  };
+  const blob = new Blob([JSON.stringify(exportPayload, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = `gunluk-plan-${keyOf(new Date())}.json`;
@@ -1021,12 +1633,14 @@ $('#importFile').addEventListener('change', async (e) => {
   if (!file) return;
   try {
     const s = JSON.parse(await file.text());
-    if (!Array.isArray(s.habits) || typeof s.marks !== 'object') throw new Error('format');
+    if ((!Array.isArray(s.habits) && !Array.isArray(s.tasks)) || (s.marks !== undefined && typeof s.marks !== 'object')) throw new Error('format');
     if (!confirm('Mevcut verilerin yerine yedek yüklensin mi?')) return;
     Object.assign(state, {
-      habits: s.habits,
-      marks: s.marks,
+      section: s.section === 'gorevler' || s.section === 'rutin' ? s.section : (state.section || 'rutin'),
+      habits: Array.isArray(s.habits) ? s.habits : (state.habits || []),
+      marks: s.marks && typeof s.marks === 'object' ? s.marks : (state.marks || {}),
       progress: s.progress && typeof s.progress === 'object' ? s.progress : {},
+      tasks: Array.isArray(s.tasks) ? s.tasks : [],
       tab: TABS.some((t) => t.id === s.tab) ? s.tab : TABS[0].id,
       profile: {
         firstName: typeof s.profile?.firstName === 'string' ? s.profile.firstName : (state.profile?.firstName || ''),

@@ -21,10 +21,12 @@ export function seedState(): AppDataState {
   }
   return {
     v: 1,
+    section: 'rutin',
     tab: TABS[0].id,
     habits,
     marks: {},
     progress: {},
+    tasks: [],
     profile: { firstName: '', lastName: '' },
   };
 }
@@ -37,6 +39,12 @@ export async function loadAppState(): Promise<AppDataState> {
       if (parsed && Array.isArray(parsed.habits) && parsed.marks) {
         if (!parsed.progress || typeof parsed.progress !== 'object') {
           parsed.progress = {};
+        }
+        if (!Array.isArray(parsed.tasks)) {
+          parsed.tasks = [];
+        }
+        if (parsed.section !== 'rutin' && parsed.section !== 'gorevler') {
+          parsed.section = 'rutin';
         }
         if (!parsed.profile || typeof parsed.profile !== 'object') {
           parsed.profile = { firstName: '', lastName: '' };

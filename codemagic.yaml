@@ -16,6 +16,11 @@ workflows:
       - name: Expo Prebuild (Native iOS Xcode projesini üret)
         script: |
           CI=1 npx expo prebuild --platform ios --clean
+          for f in ios/*/*.entitlements; do
+            if [ -f "$f" ]; then
+              /usr/libexec/PlistBuddy -c "Delete :aps-environment" "$f" 2>/dev/null || true
+            fi
+          done
       - name: CocoaPods kurulumu
         script: |
           cd ios && pod install

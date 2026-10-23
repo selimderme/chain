@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-  <title>Günlük Plan</title>
+  <title>Günlük Rutin</title>
   <meta name="theme-color" content="#fff4e6">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -13,7 +13,10 @@
 <body data-tab="beslenme">
   <header class="topbar">
     <div class="topbar-head">
-      <h1 class="app-title" id="appTitle">Günlük Plan</h1>
+      <div class="top-mode-tabs" id="topModeTabs">
+        <button type="button" class="top-mode-btn active" data-section="rutin">Günlük Rutin</button>
+        <button type="button" class="top-mode-btn" data-section="gorevler">Görevler <span class="top-mode-badge" id="tasksBadge" hidden>0</span></button>
+      </div>
       <button type="button" id="profileBtn" class="profile-circle-btn" aria-label="Profil sayfasını aç" title="Profil">👤</button>
     </div>
     <nav class="tabs" role="tablist" aria-label="Kategoriler" id="tabs"></nav>
@@ -60,21 +63,23 @@
 
         <div id="goalTimerBox" class="goal-config-box" hidden>
           <div class="inline-inputs">
+            <label>Saat
+              <input type="number" name="timerHour" min="0" max="99" value="0">
+            </label>
             <label>Dakika
               <input type="number" name="timerMin" min="0" max="999" value="2">
             </label>
-            <label>Saniye
-              <input type="number" name="timerSec" min="0" max="59" value="0">
-            </label>
           </div>
           <div class="preset-chips" id="timerPresets">
-            <button type="button" class="chip" data-min="1">1 dk</button>
-            <button type="button" class="chip" data-min="2">2 dk</button>
-            <button type="button" class="chip" data-min="3">3 dk</button>
-            <button type="button" class="chip" data-min="5">5 dk</button>
-            <button type="button" class="chip" data-min="10">10 dk</button>
-            <button type="button" class="chip" data-min="15">15 dk</button>
-            <button type="button" class="chip" data-min="30">30 dk</button>
+            <button type="button" class="chip" data-h="0" data-m="1">1 dk</button>
+            <button type="button" class="chip" data-h="0" data-m="2">2 dk</button>
+            <button type="button" class="chip" data-h="0" data-m="3">3 dk</button>
+            <button type="button" class="chip" data-h="0" data-m="5">5 dk</button>
+            <button type="button" class="chip" data-h="0" data-m="10">10 dk</button>
+            <button type="button" class="chip" data-h="0" data-m="30">30 dk</button>
+            <button type="button" class="chip" data-h="1" data-m="0">1 saat</button>
+            <button type="button" class="chip" data-h="2" data-m="0">2 saat</button>
+            <button type="button" class="chip" data-h="3" data-m="0">3 saat</button>
           </div>
         </div>
 
@@ -136,6 +141,64 @@
   <!-- Karta tıklayınca açılan Sayaç / Miktar / Tekrar Arayüzü -->
   <dialog id="actionModal" class="editor" aria-labelledby="actionTitle">
     <div id="actionBody"></div>
+  </dialog>
+
+  <!-- Görev Ekle / Düzenle Penceresi (Google Görevler Tarzı) -->
+  <dialog id="taskEditor" class="editor task-editor-dialog" aria-labelledby="taskEditorTitle">
+    <form id="taskEditorForm" method="dialog">
+      <div id="taskEditorMainView">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:10px">
+          <h2 id="taskEditorTitle" style="margin:0">Yeni görev</h2>
+          <button type="button" id="taskStarToggleBtn" class="chip">☆ Yıldızla</button>
+        </div>
+        <label>Görev adı
+          <input name="taskTitle" required maxlength="100" autocomplete="off" placeholder="Örn. Faturayı öde, Market alışverişi yap">
+        </label>
+        <label>Ayrıntılar / Not <span class="opt">(isteğe bağlı)</span>
+          <input name="taskDetail" maxlength="160" autocomplete="off" placeholder="Ayrıntı ekle...">
+        </label>
+        <div class="field-block">
+          <span class="field-label">Tarih / Zaman <span class="opt">(isteğe bağlı)</span></span>
+          <input type="hidden" name="taskDueDate" id="taskDueDateHidden">
+          <div class="dt-field-row">
+            <button type="button" id="openTaskDatePickerBtn" class="dt-select-btn">
+              <span>📅</span>
+              <span id="taskDueDateLabel" class="dt-select-text muted">Tarih ve saat seçmek için dokun...</span>
+              <span id="taskDueDateActionBadge" class="dt-action-badge">🕒 Seç</span>
+            </button>
+            <button type="button" id="clearTaskDueDateBtn" class="dt-clear-btn" hidden aria-label="Tarihi temizle">✕</button>
+          </div>
+        </div>
+        <div class="field-block">
+          <span class="field-label">Alt görevler <span class="opt" id="taskSubtaskCount">(0)</span></span>
+          <div id="taskSubtasksList" class="subtasks-list"></div>
+          <div class="subtask-add-row">
+            <input type="text" id="newTaskSubtaskInput" maxlength="80" autocomplete="off" placeholder="Alt görev ekle...">
+            <button type="button" id="addTaskSubtaskBtn" class="primary">＋ Ekle</button>
+          </div>
+        </div>
+        <div class="editor-actions">
+          <button type="button" id="deleteTaskBtn" class="danger" hidden>Sil</button>
+          <span class="spacer"></span>
+          <button type="button" id="cancelTaskBtn" class="ghost">Vazgeç</button>
+          <button type="submit" class="primary">Kaydet</button>
+        </div>
+      </div>
+
+      <div id="taskDatePickerView" hidden>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+          <button type="button" id="closeDatePickerBackBtn" class="ghost" style="padding:4px 10px">‹ Geri</button>
+          <h2 style="margin:0;font-size:1.1rem">Tarih ve Saat Seç</h2>
+        </div>
+        <div id="taskDatePickerBody"></div>
+        <div class="editor-actions">
+          <button type="button" id="clearDatePickerBtn" class="danger">Temizle</button>
+          <span class="spacer"></span>
+          <button type="button" id="cancelDatePickerBtn" class="ghost">Vazgeç</button>
+          <button type="button" id="applyDatePickerBtn" class="primary">✓ Seç</button>
+        </div>
+      </div>
+    </form>
   </dialog>
 
   <script src="app.js"></script>

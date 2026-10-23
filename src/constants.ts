@@ -40,6 +40,8 @@ export interface TabConfig {
 
 export type GoalType = 'none' | 'timer' | 'reps' | 'amount';
 
+export type MainSection = 'rutin' | 'gorevler';
+
 export interface HabitGoal {
   type: GoalType;
   target: number; // timer: saniye, reps: tekrar sayısı, amount: hedef miktar
@@ -50,6 +52,18 @@ export interface Subtask {
   id: string;
   title: string;
   done?: boolean;
+}
+
+export interface TaskItem {
+  id: string;
+  title: string;
+  detail?: string;
+  dueDate?: string;
+  starred?: boolean;
+  done: boolean;
+  createdAt: string;
+  completedAt?: string;
+  subtasks?: Subtask[];
 }
 
 export interface Habit {
@@ -64,16 +78,43 @@ export interface Habit {
 export interface UserProfile {
   firstName: string;
   lastName: string;
+  email?: string;
+  authProvider?: AuthProviderType;
   lastBackupAt?: string;
   lastRestoreAt?: string;
+  lastCloudSyncAt?: string;
+}
+
+export type AuthProviderType = 'google' | 'apple' | 'email' | 'guest';
+
+export type CloudSyncStatus =
+  | 'idle'
+  | 'syncing'
+  | 'synced'
+  | 'offline-pending'
+  | 'error';
+
+export interface AuthUser {
+  uid: string;
+  email?: string;
+  displayName?: string;
+  firstName?: string;
+  lastName?: string;
+  provider: AuthProviderType;
+  idToken?: string;
+  refreshToken?: string;
+  createdAt: string;
 }
 
 export interface AppDataState {
   v: number;
+  updatedAt?: number;
+  section?: MainSection;
   tab: TabId;
   habits: Habit[];
   marks: Record<string, Record<string, MarkType>>;
   progress?: Record<string, Record<string, number>>;
+  tasks?: TaskItem[];
   profile?: UserProfile;
 }
 
@@ -82,6 +123,23 @@ export const MARK_COLORS = {
   blue: '#3b82f6',
   red: '#ef4444',
 } as const;
+
+export const TASKS_THEME: TabTheme = {
+  isDark: true,
+  bg: '#000000',
+  surface: '#3D0000',
+  text: '#ffffff',
+  muted: '#e0a3a3',
+  accent: '#FF0000',
+  accentInk: '#ffffff',
+  accentSoft: '#950101',
+  cardBorderColor: '#950101',
+  cardBorderWidth: 1.5,
+  leftAccentBar: '#FF0000',
+  radius: 18,
+  cellRadius: 8,
+  anim: 'pulse',
+};
 
 export const MARKS: Record<
   MarkType,

@@ -27,12 +27,16 @@ import * as Haptics from 'expo-haptics';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import * as DocumentPicker from 'expo-document-picker';
+import * as Notifications from 'expo-notifications';
 
 import {
   AppDataState,
+  AuthUser,
+  CloudSyncStatus,
   GoalType,
   Habit,
   HabitGoal,
+  MainSection,
   MARKS,
   MARK_COLORS,
   MarkType,
@@ -40,6 +44,8 @@ import {
   TABS,
   TabConfig,
   TabId,
+  TaskItem,
+  TASKS_THEME,
 } from './constants';
 import {
   calculateStreaks,
@@ -50,9 +56,252 @@ import {
   keyOf,
   pad,
   parseKey,
+  TR_MONTHS,
+  TR_WEEKDAYS,
+  TR_WEEKDAYS_SHORT,
   uid,
 } from './utils';
 import { loadAppState, saveAppState, seedState } from './storage';
+import AuthScreen from './AuthScreen';
+import {
+  animateLayout,
+  AnimatedCheckCircle,
+  AnimatedNumber,
+  AnimatedProgressBar,
+  ConfettiBurst,
+  FadeSlideIn,
+  FloatingEmoji,
+  MarkPop,
+  PopOnChange,
+  PressableScale,
+  SheetPressable,
+  StreakIcon,
+  ThemeCrossfade,
+  withAlpha,
+} from './motion';
+import {
+  clearAuthSession,
+  fetchStateFromCloud,
+  hasPendingCloudSync,
+  loadAuthSession,
+  loadFirebaseConfig,
+  saveFirebaseConfig,
+  syncStateToCloud,
+} from './cloudSync';
+import {
+  DEFAULT_FIREBASE_CONFIG,
+  FirebaseConfigOptions,
+  isFirebaseConfigured,
+} from './firebaseConfig';
+
+const TIMER_PRESETS: { label: string; h: number; m: number }[] = [
+  { label: '1 dk', h: 0, m: 1 },
+  { label: '2 dk', h: 0, m: 2 },
+  { label: '3 dk', h: 0, m: 3 },
+  { label: '5 dk', h: 0, m: 5 },
+  { label: '10 dk', h: 0, m: 10 },
+  { label: '30 dk', h: 0, m: 30 },
+  { label: '1 saat', h: 1, m: 0 },
+  { label: '2 saat', h: 2, m: 0 },
+  { label: '3 saat', h: 3, m: 0 },
+];
+
+const WHEEL_ITEM_HEIGHT = 42;
+const WHEEL_VISIBLE_ITEMS = 3;
+const WHEEL_HEIGHT = WHEEL_ITEM_HEIGHT * WHEEL_VISIBLE_ITEMS;
+const HOURS_LIST = Array.from({ length: 24 }, (_, i) => i);
+const MINUTES_LIST = Array.from({ length: 60 }, (_, i) => i);
+
+const TASK_NOTIFICATION_CHANNEL_ID = 'gorev-hatirlatici';
+
+if (Platform.OS !== 'web') {
+  try {
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowBanner: true,
+        shouldShowList: true,
+        shouldPlaySound: true,
+        shouldSetBadge: false,
+      }),
+    });
+  } catch {
+    // Ignore on environments where native notifications are unavailable
+  }
+}
+
+function getTaskTriggerDate(dueStr?: string): Date | null {
+  if (!dueStr || !dueStr.trim()) return null;
+  const s = dueStr.trim();
+  const timeMatch = s.match(/(\d{1,2}):(\d{2})/);
+  const h = timeMatch ? Math.min(23, Math.max(0, parseInt(timeMatch[1], 10))) : 9;
+  const min = timeMatch ? Math.min(59, Math.max(0, parseInt(timeMatch[2], 10))) : 0;
+
+  const now = new Date();
+  for (let mIdx = 0; mIdx < TR_MONTHS.length; mIdx++) {
+    const mName = TR_MONTHS[mIdx];
+    const regex = new RegExp(`(\\d{1,2})\\s+${mName}(?:\\s+(\\d{4}))?`, 'i');
+    const match = s.match(regex);
+    if (match) {
+      const d = Math.max(1, Math.min(31, parseInt(match[1], 10)));
+      const y = match[2] ? parseInt(match[2], 10) : now.getFullYear();
+      const dt = new Date(y, mIdx, d, h, min, 0, 0);
+      if (!isNaN(dt.getTime())) {
+        return dt;
+      }
+    }
+  }
+  return null;
+}
+
+async function ensureNotificationPermissions(promptUser = false): Promise<boolean> {
+  if (Platform.OS === 'web') {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (window.Notification.permission === 'granted') return true;
+      if (promptUser && window.Notification.permission !== 'denied') {
+        try {
+          const perm = await window.Notification.requestPermission();
+          return perm === 'granted';
+        } catch {
+          return false;
+        }
+      }
+    }
+    return false;
+  }
+  try {
+    if (Platform.OS === 'android') {
+      await Notifications.setNotificationChannelAsync(TASK_NOTIFICATION_CHANNEL_ID, {
+        name: 'Görev Bildirimleri',
+        importance: Notifications.AndroidImportance.MAX,
+        vibrationPattern: [0, 250, 250, 250],
+        lightColor: '#FF0000',
+        sound: 'default',
+      });
+    }
+    const existing = await Notifications.getPermissionsAsync();
+    if (
+      existing.granted ||
+      existing.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL
+    ) {
+      return true;
+    }
+    if (promptUser) {
+      const requested = await Notifications.requestPermissionsAsync({
+        ios: {
+          allowAlert: true,
+          allowBadge: true,
+          allowSound: true,
+        },
+      });
+      return (
+        requested.granted ||
+        requested.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL
+      );
+    }
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+async function syncTaskNotifications(tasks: TaskItem[], promptPerm = false): Promise<void> {
+  if (Platform.OS === 'web') {
+    if (promptPerm) {
+      await ensureNotificationPermissions(true);
+    }
+    return;
+  }
+  try {
+    const hasActiveDatedTasks = tasks.some((t) => !t.done && !!t.dueDate);
+    const permitted = await ensureNotificationPermissions(promptPerm || hasActiveDatedTasks);
+    if (!permitted) return;
+
+    const scheduled = await Notifications.getAllScheduledNotificationsAsync();
+    for (const item of scheduled) {
+      if (item.identifier.startsWith('task-reminder-')) {
+        await Notifications.cancelScheduledNotificationAsync(item.identifier);
+      }
+    }
+
+    const nowMs = Date.now();
+    for (const task of tasks) {
+      if (task.done || !task.dueDate) continue;
+      const triggerDate = getTaskTriggerDate(task.dueDate);
+      if (!triggerDate || triggerDate.getTime() <= nowMs) continue;
+
+      await Notifications.scheduleNotificationAsync({
+        identifier: `task-reminder-${task.id}`,
+        content: {
+          title: `🔔 Görev Zamanı: ${task.title}`,
+          body: task.detail
+            ? `${task.detail} (${task.dueDate})`
+            : `📅 ${task.dueDate} için planlanan görevinizin zamanı geldi!`,
+          sound: 'default',
+          data: { taskId: task.id },
+        },
+        trigger: {
+          type: Notifications.SchedulableTriggerInputTypes.DATE,
+          date: triggerDate,
+          ...(Platform.OS === 'android'
+            ? { channelId: TASK_NOTIFICATION_CHANNEL_ID }
+            : {}),
+        },
+      });
+    }
+  } catch {
+    // Ignore errors on unsupported devices
+  }
+}
+
+function formatTaskDueDate(
+  y: number,
+  m: number,
+  d: number,
+  hasTime: boolean,
+  h: number,
+  min: number
+): string {
+  const datePart = `${d} ${TR_MONTHS[m]} ${y}`;
+  if (!hasTime) return datePart;
+  return `${datePart} · ${pad(h)}:${pad(min)}`;
+}
+
+function parseTaskDueDate(dueStr?: string): {
+  y: number;
+  m: number;
+  d: number;
+  hasTime: boolean;
+  h: number;
+  min: number;
+} {
+  const now = new Date();
+  const def = {
+    y: now.getFullYear(),
+    m: now.getMonth(),
+    d: now.getDate(),
+    hasTime: true,
+    h: 12,
+    min: 0,
+  };
+  if (!dueStr || !dueStr.trim()) return def;
+  const s = dueStr.trim();
+  const timeMatch = s.match(/(\d{1,2}):(\d{2})/);
+  const hasTime = !!timeMatch;
+  const h = timeMatch ? Math.min(23, Math.max(0, parseInt(timeMatch[1], 10))) : 12;
+  const min = timeMatch ? Math.min(59, Math.max(0, parseInt(timeMatch[2], 10))) : 0;
+
+  for (let mIdx = 0; mIdx < TR_MONTHS.length; mIdx++) {
+    const mName = TR_MONTHS[mIdx];
+    const regex = new RegExp(`(\\d{1,2})\\s+${mName}(?:\\s+(\\d{4}))?`, 'i');
+    const match = s.match(regex);
+    if (match) {
+      const d = Math.max(1, Math.min(31, parseInt(match[1], 10)));
+      const y = match[2] ? parseInt(match[2], 10) : now.getFullYear();
+      return { y, m: mIdx, d, hasTime, h, min };
+    }
+  }
+  return { ...def, hasTime, h, min };
+}
 
 function formatDuration(totalSec: number): string {
   const sec = Math.max(0, Math.round(totalSec));
@@ -67,11 +316,14 @@ function formatDuration(totalSec: number): string {
 
 function formatTimerReadable(totalSec: number): string {
   const sec = Math.max(0, Math.round(totalSec));
-  const m = Math.floor(sec / 60);
+  const h = Math.floor(sec / 3600);
+  const m = Math.floor((sec % 3600) / 60);
   const s = sec % 60;
-  if (m > 0 && s > 0) return `${m} dk ${s} sn`;
-  if (m > 0) return `${m} dk`;
-  return `${s} sn`;
+  const parts: string[] = [];
+  if (h > 0) parts.push(`${h} saat`);
+  if (m > 0) parts.push(`${m} dk`);
+  if (s > 0 && h === 0) parts.push(`${s} sn`);
+  return parts.length > 0 ? parts.join(' ') : '0 dk';
 }
 
 function getQuickSteps(goal: HabitGoal): number[] {
@@ -164,6 +416,145 @@ function HabitWeekScroll({
   );
 }
 
+interface TimeWheelColumnProps {
+  label: string;
+  items: number[];
+  selectedValue: number;
+  onValueChange: (val: number) => void;
+  onWheelTouchChange?: (touching: boolean) => void;
+}
+
+function TimeWheelColumn({
+  label,
+  items,
+  selectedValue,
+  onValueChange,
+  onWheelTouchChange,
+}: TimeWheelColumnProps) {
+  const scrollRef = useRef<ScrollView>(null);
+  const isUserScrolling = useRef(false);
+  const lastValRef = useRef(selectedValue);
+
+  useEffect(() => {
+    lastValRef.current = selectedValue;
+    if (!isUserScrolling.current) {
+      const idx = Math.max(0, items.indexOf(selectedValue));
+      const timer = setTimeout(() => {
+        scrollRef.current?.scrollTo({
+          y: idx * WHEEL_ITEM_HEIGHT,
+          animated: false,
+        });
+      }, 0);
+      return () => clearTimeout(timer);
+    }
+  }, [selectedValue, items]);
+
+  const handleOffset = (offsetY: number) => {
+    const rawIdx = Math.round(offsetY / WHEEL_ITEM_HEIGHT);
+    const clampedIdx = Math.max(0, Math.min(items.length - 1, rawIdx));
+    const val = items[clampedIdx];
+    if (val !== undefined && val !== lastValRef.current) {
+      lastValRef.current = val;
+      Haptics.selectionAsync().catch(() => {});
+      onValueChange(val);
+    }
+  };
+
+  return (
+    <View style={styles.wheelCol}>
+      <Text style={styles.timeStepperLabel}>{label}</Text>
+      <View
+        style={styles.wheelBox}
+        onTouchStart={() => {
+          isUserScrolling.current = true;
+          onWheelTouchChange?.(true);
+        }}
+        onTouchEnd={() => {
+          onWheelTouchChange?.(false);
+        }}
+        onTouchCancel={() => {
+          isUserScrolling.current = false;
+          onWheelTouchChange?.(false);
+        }}
+      >
+        <View pointerEvents="none" style={styles.wheelHighlightBar} />
+        <ScrollView
+          ref={scrollRef}
+          showsVerticalScrollIndicator={false}
+          nestedScrollEnabled
+          bounces={false}
+          decelerationRate="fast"
+          snapToInterval={WHEEL_ITEM_HEIGHT}
+          snapToAlignment="start"
+          scrollEventThrottle={16}
+          contentOffset={{
+            x: 0,
+            y: Math.max(0, items.indexOf(selectedValue)) * WHEEL_ITEM_HEIGHT,
+          }}
+          onLayout={() => {
+            const idx = Math.max(0, items.indexOf(selectedValue));
+            scrollRef.current?.scrollTo({
+              y: idx * WHEEL_ITEM_HEIGHT,
+              animated: false,
+            });
+          }}
+          onScrollBeginDrag={() => {
+            isUserScrolling.current = true;
+            onWheelTouchChange?.(true);
+          }}
+          onScroll={(e) => {
+            handleOffset(e.nativeEvent.contentOffset.y);
+          }}
+          onScrollEndDrag={(e) => {
+            handleOffset(e.nativeEvent.contentOffset.y);
+            onWheelTouchChange?.(false);
+          }}
+          onMomentumScrollEnd={(e) => {
+            isUserScrolling.current = false;
+            onWheelTouchChange?.(false);
+            handleOffset(e.nativeEvent.contentOffset.y);
+          }}
+          contentContainerStyle={{
+            paddingVertical: WHEEL_ITEM_HEIGHT,
+          }}
+          style={styles.wheelScroll}
+        >
+          {items.map((item, idx) => {
+            const isSelected = item === selectedValue;
+            return (
+              <Pressable
+                key={item}
+                onPress={() => {
+                  isUserScrolling.current = false;
+                  lastValRef.current = item;
+                  Haptics.selectionAsync().catch(() => {});
+                  onValueChange(item);
+                  scrollRef.current?.scrollTo({
+                    y: idx * WHEEL_ITEM_HEIGHT,
+                    animated: true,
+                  });
+                }}
+                style={styles.wheelItem}
+              >
+                <Text
+                  style={[
+                    styles.wheelItemText,
+                    isSelected
+                      ? styles.wheelItemTextSelected
+                      : styles.wheelItemTextDim,
+                  ]}
+                >
+                  {pad(item)}
+                </Text>
+              </Pressable>
+            );
+          })}
+        </ScrollView>
+      </View>
+    </View>
+  );
+}
+
 export default function MainApp() {
   return (
     <SafeAreaProvider>
@@ -203,8 +594,8 @@ function GunlukPlanScreen() {
   const [habitName, setHabitName] = useState('');
   const [habitDetail, setHabitDetail] = useState('');
   const [goalType, setGoalType] = useState<GoalType>('none');
+  const [timerHour, setTimerHour] = useState('0');
   const [timerMin, setTimerMin] = useState('2');
-  const [timerSec, setTimerSec] = useState('0');
   const [goalTargetStr, setGoalTargetStr] = useState('');
   const [goalUnit, setGoalUnit] = useState('');
   const [editorSubtasks, setEditorSubtasks] = useState<Subtask[]>([]);
@@ -223,19 +614,198 @@ function GunlukPlanScreen() {
   const [profileLastName, setProfileLastName] = useState('');
   const [profileSavedBanner, setProfileSavedBanner] = useState(false);
 
+  // Kimlik Doğrulama (Giriş / Kayıt) & Bulut Yedekleme Durumu
+  const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [onboardingDone, setOnboardingDone] = useState(false);
+  const [authScreenVisible, setAuthScreenVisible] = useState(false);
+  const [cloudSyncStatus, setCloudSyncStatus] =
+    useState<CloudSyncStatus>('idle');
+  const [cloudNoticeMsg, setCloudNoticeMsg] = useState('');
+  const [firebaseSettingsOpen, setFirebaseSettingsOpen] = useState(false);
+  const [fbConfig, setFbConfig] = useState<FirebaseConfigOptions>(
+    DEFAULT_FIREBASE_CONFIG
+  );
+  const [fbConfigSavedBanner, setFbConfigSavedBanner] = useState(false);
+
+  // Görevler (Google Görevler benzeri) Durumu
+  const [taskFilter, setTaskFilter] = useState<'all' | 'starred'>('all');
+  const [quickTaskTitle, setQuickTaskTitle] = useState('');
+  const [completedExpanded, setCompletedExpanded] = useState(true);
+  const [taskReorderMode, setTaskReorderMode] = useState(false);
+  const [taskModalOpen, setTaskModalOpen] = useState(false);
+  const [editingTask, setEditingTask] = useState<TaskItem | null>(null);
+  const [taskTitle, setTaskTitle] = useState('');
+  const [taskDetail, setTaskDetail] = useState('');
+  const [taskDueDate, setTaskDueDate] = useState('');
+  const [taskStarred, setTaskStarred] = useState(false);
+  const [taskSubtasks, setTaskSubtasks] = useState<Subtask[]>([]);
+  const [newTaskSubtaskTitle, setNewTaskSubtaskTitle] = useState('');
+  const [confirmTaskDelete, setConfirmTaskDelete] = useState(false);
+  // Tamamlanma animasyonu oynarken (liste kaymadan önce) dairesi dolu görünen görevler
+  const [completingTaskIds, setCompletingTaskIds] = useState<string[]>([]);
+  // Sekmedeki tüm maddeler bugün tamamlanınca tetiklenen kutlama (konfeti) sayacı
+  const [celebrateKey, setCelebrateKey] = useState(0);
+  const prevDoneRef = useRef<{ tab: TabId; done: number } | null>(null);
+
+  // Görev Tarih & Saat Seçici Arayüzü Durumu
+  const [taskDatePickerOpen, setTaskDatePickerOpen] = useState(false);
+  const [pickerViewYear, setPickerViewYear] = useState(() => new Date().getFullYear());
+  const [pickerViewMonth, setPickerViewMonth] = useState(() => new Date().getMonth());
+  const [pickerSelectedDate, setPickerSelectedDate] = useState(() => {
+    const n = new Date();
+    return { y: n.getFullYear(), m: n.getMonth(), d: n.getDate() };
+  });
+  const [pickerHasTime, setPickerHasTime] = useState(true);
+  const [pickerHour, setPickerHour] = useState(12);
+  const [pickerMinute, setPickerMinute] = useState(0);
+  const [pickerOuterScrollEnabled, setPickerOuterScrollEnabled] = useState(true);
+  const firedWebNotifsRef = useRef<Set<string>>(new Set());
+  const skipNextAutoCloudSyncRef = useRef(false);
+  const stateRef = useRef<AppDataState>(state);
+  useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
   // Hero emoji animasyonu
   const heroAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
-    loadAppState().then((initial) => {
+    let mounted = true;
+    Promise.all([
+      loadAppState(),
+      loadAuthSession(),
+      loadFirebaseConfig(),
+      hasPendingCloudSync(),
+    ]).then(async ([initial, session, loadedFbConfig, pendingSync]) => {
+      if (!mounted) return;
       setState(initial);
       setProfileFirstName(initial.profile?.firstName || '');
       setProfileLastName(initial.profile?.lastName || '');
+      setFbConfig(loadedFbConfig);
+      setAuthUser(session.user);
+      setOnboardingDone(session.hasCompletedOnboarding);
       setLoaded(true);
+
+      if (session.user && session.user.provider !== 'guest') {
+        if (pendingSync) {
+          setCloudSyncStatus('syncing');
+          const res = await syncStateToCloud(session.user, initial);
+          if (!mounted) return;
+          setCloudSyncStatus(res.ok ? 'synced' : 'offline-pending');
+        } else {
+          setCloudSyncStatus('syncing');
+          const cloudState = await fetchStateFromCloud(session.user);
+          if (!mounted) return;
+          if (
+            cloudState &&
+            (cloudState.updatedAt || 0) > (initial.updatedAt || 0)
+          ) {
+            skipNextAutoCloudSyncRef.current = true;
+            setState(cloudState);
+            setProfileFirstName(cloudState.profile?.firstName || '');
+            setProfileLastName(cloudState.profile?.lastName || '');
+            await saveAppState(cloudState);
+          }
+          setCloudSyncStatus('synced');
+        }
+      }
     });
+    return () => {
+      mounted = false;
+    };
   }, []);
 
-  // Gün değişimini takip et (uygulama arka plandan öne geldiğinde)
+  // Kullanıcı veri değiştirdiğinde önce yerel AsyncStorage'a kaydedilir,
+  // ardından Google/Apple/E-posta ile giriş yapılmışsa arka planda otomatik buluta yedeklenir.
+  useEffect(() => {
+    if (!loaded || !authUser || authUser.provider === 'guest') return;
+    if (skipNextAutoCloudSyncRef.current) {
+      skipNextAutoCloudSyncRef.current = false;
+      return;
+    }
+    const timer = setTimeout(async () => {
+      setCloudSyncStatus('syncing');
+      const res = await syncStateToCloud(authUser, stateRef.current);
+      if (res.ok && res.syncedAt) {
+        setCloudSyncStatus('synced');
+      } else if (res.offline) {
+        setCloudSyncStatus('offline-pending');
+      } else {
+        setCloudSyncStatus('error');
+      }
+    }, 900);
+    return () => clearTimeout(timer);
+  }, [loaded, authUser, state.updatedAt]);
+
+  // Çevrimdışı iken yapılan değişiklikleri internet geldiğinde otomatik buluta gönder
+  useEffect(() => {
+    if (!loaded || !authUser || authUser.provider === 'guest') return;
+
+    const flushPendingIfOnline = async () => {
+      const pending = await hasPendingCloudSync();
+      if (!pending && cloudSyncStatus !== 'offline-pending') return;
+      setCloudSyncStatus('syncing');
+      const res = await syncStateToCloud(authUser, stateRef.current);
+      if (res.ok) {
+        setCloudSyncStatus('synced');
+      } else {
+        setCloudSyncStatus('offline-pending');
+      }
+    };
+
+    if (Platform.OS === 'web' && typeof window !== 'undefined') {
+      window.addEventListener('online', flushPendingIfOnline);
+      return () => window.removeEventListener('online', flushPendingIfOnline);
+    }
+
+    const interval = setInterval(flushPendingIfOnline, 20000);
+    return () => clearInterval(interval);
+  }, [loaded, authUser, cloudSyncStatus]);
+
+  // Görev bildirimlerini zamanla (iOS / Android yerel bildirimler)
+  useEffect(() => {
+    if (!loaded) return;
+    syncTaskNotifications(state.tasks || [], false);
+  }, [loaded, state.tasks]);
+
+  // Web veya uygulama açıkken zamanı gelen görevleri kontrol et
+  useEffect(() => {
+    if (!loaded) return;
+    const checkDueTasks = () => {
+      const nowMs = Date.now();
+      for (const task of state.tasks || []) {
+        if (task.done || !task.dueDate) continue;
+        const trig = getTaskTriggerDate(task.dueDate);
+        if (!trig) continue;
+        const diff = nowMs - trig.getTime();
+        const key = `${task.id}:${task.dueDate}`;
+        if (diff >= 0 && diff < 60000 && !firedWebNotifsRef.current.has(key)) {
+          firedWebNotifsRef.current.add(key);
+          if (
+            Platform.OS === 'web' &&
+            typeof window !== 'undefined' &&
+            'Notification' in window &&
+            window.Notification.permission === 'granted'
+          ) {
+            try {
+              new window.Notification(`🔔 Görev Zamanı: ${task.title}`, {
+                body: task.detail
+                  ? `${task.detail} (${task.dueDate})`
+                  : `📅 ${task.dueDate} için planlanan görevinizin zamanı geldi!`,
+              });
+            } catch {
+              // ignore
+            }
+          }
+        }
+      }
+    };
+    checkDueTasks();
+    const timer = setInterval(checkDueTasks, 15000);
+    return () => clearInterval(timer);
+  }, [loaded, state.tasks]);
+
+  // Gün değişimini takip et (uygulama arka plandan öne geldiğinde) ve bekleyen bulut yedeği varsa eşitle
   useEffect(() => {
     const sub = AppState.addEventListener('change', (nextAppState) => {
       if (nextAppState === 'active') {
@@ -253,10 +823,19 @@ function GunlukPlanScreen() {
             d: now.getDate(),
           };
         });
+        if (authUser && authUser.provider !== 'guest') {
+          hasPendingCloudSync().then(async (pending) => {
+            if (pending) {
+              setCloudSyncStatus('syncing');
+              const res = await syncStateToCloud(authUser, stateRef.current);
+              setCloudSyncStatus(res.ok ? 'synced' : 'offline-pending');
+            }
+          });
+        }
       }
     });
     return () => sub.remove();
-  }, []);
+  }, [authUser]);
 
   // Hero emoji sürekli animasyonu
   useEffect(() => {
@@ -285,14 +864,193 @@ function GunlukPlanScreen() {
     () => TABS.find((t) => t.id === state.tab) || TABS[0],
     [state.tab]
   );
-  const theme = activeTab.theme;
+  const isTasksMode = state.section === 'gorevler' && !profileOpen;
+  const theme = isTasksMode ? TASKS_THEME : activeTab.theme;
 
   const updateAndSave = (updater: (prev: AppDataState) => AppDataState) => {
     setState((prev) => {
-      const next = updater(prev);
+      const updated = updater(prev);
+      const next: AppDataState = {
+        ...updated,
+        updatedAt: Date.now(),
+      };
       saveAppState(next);
       return next;
     });
+  };
+
+  // Giriş / Kayıt tamamlandığında çalışan ana işleyici:
+  // Yeni bir cihazda Google/Apple/E-posta ile giriş yapıldığında buluttaki yedeği indirir,
+  // eğer bulutta henüz yedek yoksa mevcut yerel verileri buluta yedekler.
+  const handleUserAuthenticated = async (user: AuthUser) => {
+    setAuthUser(user);
+    setOnboardingDone(true);
+    setAuthScreenVisible(false);
+    setCloudNoticeMsg('');
+
+    if (user.provider === 'guest') {
+      setCloudSyncStatus('idle');
+      return;
+    }
+
+    setCloudSyncStatus('syncing');
+    const cloudBackup = await fetchStateFromCloud(user);
+
+    if (cloudBackup) {
+      skipNextAutoCloudSyncRef.current = true;
+      const syncedNow = formatNowTimestamp();
+      const restoredState: AppDataState = {
+        ...cloudBackup,
+        profile: {
+          firstName:
+            cloudBackup.profile?.firstName ||
+            user.firstName ||
+            state.profile?.firstName ||
+            '',
+          lastName:
+            cloudBackup.profile?.lastName ||
+            user.lastName ||
+            state.profile?.lastName ||
+            '',
+          ...cloudBackup.profile,
+          email: user.email,
+          authProvider: user.provider,
+          lastCloudSyncAt: syncedNow,
+          lastRestoreAt: syncedNow,
+        },
+      };
+      setState(restoredState);
+      setProfileFirstName(restoredState.profile?.firstName || '');
+      setProfileLastName(restoredState.profile?.lastName || '');
+      await saveAppState(restoredState);
+      setCloudSyncStatus('synced');
+      setCloudNoticeMsg(
+        `✓ ${
+          user.email || 'Hesabınız'
+        } üzerindeki bulut yedeği telefonunuza otomatik olarak indirildi.`
+      );
+    } else {
+      const syncedNow = formatNowTimestamp();
+      const first = state.profile?.firstName || user.firstName || '';
+      const last = state.profile?.lastName || user.lastName || '';
+      setProfileFirstName(first);
+      setProfileLastName(last);
+
+      const nextState: AppDataState = {
+        ...state,
+        updatedAt: Date.now(),
+        profile: {
+          ...(state.profile || { firstName: '', lastName: '' }),
+          firstName: first,
+          lastName: last,
+          email: user.email,
+          authProvider: user.provider,
+          lastCloudSyncAt: syncedNow,
+        },
+      };
+      skipNextAutoCloudSyncRef.current = true;
+      setState(nextState);
+      await saveAppState(nextState);
+      const res = await syncStateToCloud(user, nextState);
+      setCloudSyncStatus(res.ok ? 'synced' : 'offline-pending');
+      setCloudNoticeMsg(
+        res.ok
+          ? `✓ Mevcut tüm verileriniz ${
+              user.email || 'hesabınıza'
+            } başarıyla yedeklendi.`
+          : '⚡ Verileriniz cihazınıza kaydedildi, internet bağlantısı kurulduğunda buluta yedeklenecek.'
+      );
+    }
+  };
+
+  const handleManualCloudBackup = async () => {
+    if (!authUser || authUser.provider === 'guest') {
+      setAuthScreenVisible(true);
+      return;
+    }
+    Haptics.selectionAsync().catch(() => {});
+    setCloudSyncStatus('syncing');
+    setCloudNoticeMsg('');
+    const syncedNow = formatNowTimestamp();
+    const nextState: AppDataState = {
+      ...state,
+      updatedAt: Date.now(),
+      profile: {
+        firstName: state.profile?.firstName || authUser.firstName || '',
+        lastName: state.profile?.lastName || authUser.lastName || '',
+        ...state.profile,
+        email: authUser.email,
+        authProvider: authUser.provider,
+        lastCloudSyncAt: syncedNow,
+      },
+    };
+    skipNextAutoCloudSyncRef.current = true;
+    setState(nextState);
+    await saveAppState(nextState);
+    const res = await syncStateToCloud(authUser, nextState);
+    if (res.ok) {
+      setCloudSyncStatus('synced');
+      setCloudNoticeMsg('✓ Tüm verileriniz bulut hesabınıza başarıyla yedeklendi.');
+    } else {
+      setCloudSyncStatus('offline-pending');
+      setCloudNoticeMsg(
+        '⚡ İnternet bağlantısı yok. Verileriniz telefonda güvende; bağlantı sağlandığında otomatik yedeklenecek.'
+      );
+    }
+  };
+
+  const handleManualCloudRestore = async () => {
+    if (!authUser || authUser.provider === 'guest') return;
+    Haptics.selectionAsync().catch(() => {});
+    setCloudSyncStatus('syncing');
+    setCloudNoticeMsg('');
+    const cloudBackup = await fetchStateFromCloud(authUser);
+    if (cloudBackup) {
+      skipNextAutoCloudSyncRef.current = true;
+      const syncedNow = formatNowTimestamp();
+      const restored: AppDataState = {
+        ...cloudBackup,
+        profile: {
+          firstName: cloudBackup.profile?.firstName || authUser.firstName || '',
+          lastName: cloudBackup.profile?.lastName || authUser.lastName || '',
+          ...cloudBackup.profile,
+          email: authUser.email,
+          authProvider: authUser.provider,
+          lastCloudSyncAt: syncedNow,
+          lastRestoreAt: syncedNow,
+        },
+      };
+      setState(restored);
+      setProfileFirstName(restored.profile?.firstName || '');
+      setProfileLastName(restored.profile?.lastName || '');
+      await saveAppState(restored);
+      setCloudSyncStatus('synced');
+      setCloudNoticeMsg('✓ Buluttaki en güncel yedek telefonunuza indirildi.');
+    } else {
+      setCloudSyncStatus('synced');
+      setCloudNoticeMsg('ℹ️ Bu hesaba ait bulutta kayıtlı başka bir yedek bulunamadı.');
+    }
+  };
+
+  const handleSignOut = async () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    await clearAuthSession();
+    setAuthUser(null);
+    setCloudSyncStatus('idle');
+    setCloudNoticeMsg('');
+    setAuthScreenVisible(true);
+  };
+
+  const handleSaveFirebaseSettings = async () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+      () => {}
+    );
+    await saveFirebaseConfig(fbConfig);
+    setFbConfigSavedBanner(true);
+    setTimeout(() => setFbConfigSavedBanner(false), 3000);
+    if (authUser && authUser.provider !== 'guest') {
+      handleManualCloudBackup();
+    }
   };
 
   const getMark = (habitId: string, dateStr: string): MarkType | '' => {
@@ -433,14 +1191,24 @@ function GunlukPlanScreen() {
     });
   };
 
+  const handleSelectSection = (sec: MainSection) => {
+    Haptics.selectionAsync().catch(() => {});
+    if (profileOpen) {
+      setProfileOpen(false);
+    }
+    setReorderMode(false);
+    setTaskReorderMode(false);
+    updateAndSave((prev) => ({ ...prev, section: sec }));
+  };
+
   const handleSelectTab = (tabId: TabId) => {
     Haptics.selectionAsync().catch(() => {});
     if (profileOpen) {
       setProfileOpen(false);
     }
-    if (tabId === state.tab) return;
     setReorderMode(false);
-    updateAndSave((prev) => ({ ...prev, tab: tabId }));
+    setTaskReorderMode(false);
+    updateAndSave((prev) => ({ ...prev, section: 'rutin', tab: tabId }));
   };
 
   const handleToggleProfile = () => {
@@ -450,6 +1218,7 @@ function GunlukPlanScreen() {
       setProfileFirstName(state.profile?.firstName || '');
       setProfileLastName(state.profile?.lastName || '');
       setReorderMode(false);
+      setTaskReorderMode(false);
     }
     setProfileOpen((prev) => !prev);
   };
@@ -489,6 +1258,7 @@ function GunlukPlanScreen() {
 
   const moveHabit = (habitId: string, direction: -1 | 1) => {
     Haptics.selectionAsync().catch(() => {});
+    animateLayout();
     updateAndSave((prev) => {
       const tabHabits = prev.habits.filter((h) => h.tab === prev.tab);
       const ids = tabHabits.map((h) => h.id);
@@ -520,20 +1290,23 @@ function GunlukPlanScreen() {
     if (g && g.type !== 'none' && g.target > 0) {
       setGoalType(g.type);
       if (g.type === 'timer') {
-        setTimerMin(String(Math.floor(g.target / 60)));
-        setTimerSec(String(g.target % 60));
+        const totalMinutes = Math.max(1, Math.round(g.target / 60));
+        const h = Math.floor(totalMinutes / 60);
+        const m = totalMinutes % 60;
+        setTimerHour(String(h));
+        setTimerMin(String(m));
         setGoalTargetStr('');
         setGoalUnit('');
       } else {
         setGoalTargetStr(String(g.target));
         setGoalUnit(g.unit || (g.type === 'reps' ? 'tekrar' : ''));
+        setTimerHour('0');
         setTimerMin('2');
-        setTimerSec('0');
       }
     } else {
       setGoalType('none');
+      setTimerHour('0');
       setTimerMin('2');
-      setTimerSec('0');
       setGoalTargetStr('');
       setGoalUnit('');
     }
@@ -588,9 +1361,9 @@ function GunlukPlanScreen() {
 
     let finalGoal: HabitGoal | undefined = undefined;
     if (goalType === 'timer') {
+      const h = Math.max(0, parseInt(timerHour || '0', 10) || 0);
       const m = Math.max(0, parseInt(timerMin || '0', 10) || 0);
-      const s = Math.max(0, parseInt(timerSec || '0', 10) || 0);
-      const totalSec = m * 60 + s;
+      const totalSec = h * 3600 + m * 60;
       if (totalSec <= 0) {
         Alert.alert('Uyarı', 'Lütfen geçerli bir sayaç süresi girin.');
         return;
@@ -690,12 +1463,302 @@ function GunlukPlanScreen() {
     setEditorOpen(false);
   };
 
+  // ───────── Görevler (Google Görevler benzeri) İşlemleri ─────────
+  const handleQuickAddTask = () => {
+    const trimmed = quickTaskTitle.trim();
+    if (!trimmed) return;
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+      () => {}
+    );
+    const newTask: TaskItem = {
+      id: uid(),
+      title: trimmed,
+      detail: '',
+      dueDate: '',
+      starred: taskFilter === 'starred',
+      done: false,
+      createdAt: formatNowTimestamp(),
+      subtasks: [],
+    };
+    animateLayout();
+    updateAndSave((prev) => ({
+      ...prev,
+      tasks: [newTask, ...(prev.tasks || [])],
+    }));
+    setQuickTaskTitle('');
+  };
+
+  const openTaskModal = (task: TaskItem | null) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    setEditingTask(task);
+    setTaskTitle(task ? task.title : '');
+    setTaskDetail(task?.detail || '');
+    setTaskDueDate(task?.dueDate || '');
+    setTaskStarred(task ? !!task.starred : taskFilter === 'starred');
+    setTaskSubtasks(task?.subtasks ? [...task.subtasks] : []);
+    setNewTaskSubtaskTitle('');
+    setConfirmTaskDelete(false);
+    setTaskDatePickerOpen(false);
+    setTaskModalOpen(true);
+  };
+
+  const openTaskDatePicker = () => {
+    Haptics.selectionAsync().catch(() => {});
+    const parsed = parseTaskDueDate(taskDueDate);
+    setPickerViewYear(parsed.y);
+    setPickerViewMonth(parsed.m);
+    setPickerSelectedDate({ y: parsed.y, m: parsed.m, d: parsed.d });
+    setPickerHasTime(parsed.hasTime);
+    setPickerHour(parsed.h);
+    setPickerMinute(parsed.min);
+    setTaskDatePickerOpen(true);
+  };
+
+  const changePickerMonth = (delta: number) => {
+    Haptics.selectionAsync().catch(() => {});
+    const d = new Date(pickerViewYear, pickerViewMonth + delta, 1);
+    setPickerViewYear(d.getFullYear());
+    setPickerViewMonth(d.getMonth());
+  };
+
+  const applyTaskDatePicker = () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+      () => {}
+    );
+    ensureNotificationPermissions(true).catch(() => {});
+    const formatted = formatTaskDueDate(
+      pickerSelectedDate.y,
+      pickerSelectedDate.m,
+      pickerSelectedDate.d,
+      pickerHasTime,
+      pickerHour,
+      pickerMinute
+    );
+    setTaskDueDate(formatted);
+    setTaskDatePickerOpen(false);
+  };
+
+  const syncTaskSubtasksIfEditing = (nextList: Subtask[]) => {
+    setTaskSubtasks(nextList);
+    if (editingTask) {
+      updateAndSave((prev) => ({
+        ...prev,
+        tasks: (prev.tasks || []).map((t) =>
+          t.id === editingTask.id ? { ...t, subtasks: nextList } : t
+        ),
+      }));
+    }
+  };
+
+  const handleAddTaskSubtask = () => {
+    const t = newTaskSubtaskTitle.trim();
+    if (!t) return;
+    Haptics.selectionAsync().catch(() => {});
+    const nextList = [...taskSubtasks, { id: uid(), title: t, done: false }];
+    syncTaskSubtasksIfEditing(nextList);
+    setNewTaskSubtaskTitle('');
+  };
+
+  const handleToggleTaskSubtaskModal = (subId: string) => {
+    Haptics.selectionAsync().catch(() => {});
+    const nextList = taskSubtasks.map((s) =>
+      s.id === subId ? { ...s, done: !s.done } : s
+    );
+    syncTaskSubtasksIfEditing(nextList);
+  };
+
+  const handleRemoveTaskSubtaskModal = (subId: string) => {
+    Haptics.selectionAsync().catch(() => {});
+    const nextList = taskSubtasks.filter((s) => s.id !== subId);
+    syncTaskSubtasksIfEditing(nextList);
+  };
+
+  const saveTaskModal = () => {
+    const trimmedTitle = taskTitle.trim();
+    const trimmedDetail = taskDetail.trim();
+    const trimmedDue = taskDueDate.trim();
+    if (!trimmedTitle) {
+      Alert.alert('Uyarı', 'Lütfen bir görev adı girin.');
+      return;
+    }
+    const pendingSub = newTaskSubtaskTitle.trim();
+    const finalSubtasks = pendingSub
+      ? [...taskSubtasks, { id: uid(), title: pendingSub, done: false }]
+      : taskSubtasks;
+
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+      () => {}
+    );
+    if (trimmedDue) {
+      ensureNotificationPermissions(true).catch(() => {});
+    }
+    updateAndSave((prev) => {
+      const currentTasks = prev.tasks || [];
+      if (editingTask) {
+        return {
+          ...prev,
+          tasks: currentTasks.map((t) =>
+            t.id === editingTask.id
+              ? {
+                  ...t,
+                  title: trimmedTitle,
+                  detail: trimmedDetail,
+                  dueDate: trimmedDue,
+                  starred: taskStarred,
+                  subtasks: finalSubtasks,
+                }
+              : t
+          ),
+        };
+      }
+      const newTask: TaskItem = {
+        id: uid(),
+        title: trimmedTitle,
+        detail: trimmedDetail,
+        dueDate: trimmedDue,
+        starred: taskStarred,
+        done: false,
+        createdAt: formatNowTimestamp(),
+        subtasks: finalSubtasks,
+      };
+      return {
+        ...prev,
+        tasks: [newTask, ...currentTasks],
+      };
+    });
+    setTaskModalOpen(false);
+  };
+
+  const handleToggleTaskDone = (taskId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+    const nowStamp = formatNowTimestamp();
+    animateLayout();
+    updateAndSave((prev) => ({
+      ...prev,
+      tasks: (prev.tasks || []).map((t) =>
+        t.id === taskId
+          ? {
+              ...t,
+              done: !t.done,
+              completedAt: !t.done ? nowStamp : undefined,
+            }
+          : t
+      ),
+    }));
+  };
+
+  // Aktif listedeki daireye dokununca: önce daire dolup ✓ belirir, ardından görev
+  // yumuşak bir kaymayla "Tamamlananlar" bölümüne taşınır (Google Görevler hissi).
+  const handleCompleteTaskAnimated = (taskId: string) => {
+    if (completingTaskIds.includes(taskId)) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    setCompletingTaskIds((ids) => [...ids, taskId]);
+    setTimeout(() => {
+      handleToggleTaskDone(taskId);
+      setCompletingTaskIds((ids) => ids.filter((id) => id !== taskId));
+    }, 320);
+  };
+
+  const handleToggleTaskStar = (taskId: string) => {
+    Haptics.selectionAsync().catch(() => {});
+    updateAndSave((prev) => ({
+      ...prev,
+      tasks: (prev.tasks || []).map((t) =>
+        t.id === taskId ? { ...t, starred: !t.starred } : t
+      ),
+    }));
+  };
+
+  const handleToggleTaskSubtaskOnCard = (taskId: string, subId: string) => {
+    Haptics.selectionAsync().catch(() => {});
+    updateAndSave((prev) => ({
+      ...prev,
+      tasks: (prev.tasks || []).map((t) =>
+        t.id === taskId
+          ? {
+              ...t,
+              subtasks: (t.subtasks || []).map((s) =>
+                s.id === subId ? { ...s, done: !s.done } : s
+              ),
+            }
+          : t
+      ),
+    }));
+  };
+
+  const handleDeleteTaskFromModal = () => {
+    if (!editingTask) return;
+    if (!confirmTaskDelete) {
+      Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
+      setConfirmTaskDelete(true);
+      return;
+    }
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(
+      () => {}
+    );
+    const deleteId = editingTask.id;
+    updateAndSave((prev) => ({
+      ...prev,
+      tasks: (prev.tasks || []).filter((t) => t.id !== deleteId),
+    }));
+    setTaskModalOpen(false);
+  };
+
+  const handleDeleteSingleTask = (taskId: string) => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    animateLayout();
+    updateAndSave((prev) => ({
+      ...prev,
+      tasks: (prev.tasks || []).filter((t) => t.id !== taskId),
+    }));
+  };
+
+  const handleClearCompletedTasks = () => {
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning).catch(
+      () => {}
+    );
+    animateLayout();
+    updateAndSave((prev) => ({
+      ...prev,
+      tasks: (prev.tasks || []).filter((t) => !t.done),
+    }));
+  };
+
+  const moveTask = (taskId: string, direction: -1 | 1) => {
+    Haptics.selectionAsync().catch(() => {});
+    animateLayout();
+    updateAndSave((prev) => {
+      const allTasks = prev.tasks || [];
+      const activeIds = allTasks.filter((t) => !t.done).map((t) => t.id);
+      const i = activeIds.indexOf(taskId);
+      const j = i + direction;
+      if (i < 0 || j < 0 || j >= activeIds.length) return prev;
+      [activeIds[i], activeIds[j]] = [activeIds[j], activeIds[i]];
+
+      const slots: number[] = [];
+      allTasks.forEach((t, idx) => {
+        if (!t.done) slots.push(idx);
+      });
+      const byId = new Map(allTasks.map((t) => [t.id, t]));
+      const nextTasks = [...allTasks];
+      activeIds.forEach((id, k) => {
+        const item = byId.get(id);
+        if (item) nextTasks[slots[k]] = item;
+      });
+      return { ...prev, tasks: nextTasks };
+    });
+  };
+
   // Yedekle (iOS/Android Share Sheet & Web İndirme)
   const handleExport = async () => {
     try {
       const nowStamp = formatNowTimestamp();
       const exportState: AppDataState = {
         ...state,
+        habits: state.habits || [],
+        marks: state.marks || {},
+        progress: state.progress || {},
+        tasks: state.tasks || [],
         profile: {
           firstName: state.profile?.firstName || '',
           lastName: state.profile?.lastName || '',
@@ -705,6 +1768,7 @@ function GunlukPlanScreen() {
       };
       updateAndSave((prev) => ({
         ...prev,
+        tasks: prev.tasks || [],
         profile: {
           firstName: prev.profile?.firstName || '',
           lastName: prev.profile?.lastName || '',
@@ -733,7 +1797,7 @@ function GunlukPlanScreen() {
       if (canShare) {
         await Sharing.shareAsync(fileUri, {
           mimeType: 'application/json',
-          dialogTitle: 'Günlük Plan Yedeğini Kaydet',
+          dialogTitle: 'Günlük Rutin ve Görevler Yedeğini Kaydet',
           UTI: 'public.json',
         });
       } else {
@@ -768,7 +1832,10 @@ function GunlukPlanScreen() {
         });
       }
       const parsed = JSON.parse(content);
-      if (!Array.isArray(parsed?.habits) || typeof parsed?.marks !== 'object') {
+      if (
+        (!Array.isArray(parsed?.habits) && !Array.isArray(parsed?.tasks)) ||
+        (parsed?.marks !== undefined && typeof parsed?.marks !== 'object')
+      ) {
         throw new Error('format');
       }
 
@@ -789,12 +1856,20 @@ function GunlukPlanScreen() {
         setProfileLastName(restoredLastName);
         updateAndSave((prev) => ({
           v: 1,
-          habits: parsed.habits,
-          marks: parsed.marks,
+          section:
+            parsed.section === 'gorevler' || parsed.section === 'rutin'
+              ? parsed.section
+              : prev.section || 'rutin',
+          habits: Array.isArray(parsed.habits) ? parsed.habits : prev.habits,
+          marks:
+            parsed.marks && typeof parsed.marks === 'object'
+              ? parsed.marks
+              : prev.marks,
           progress:
             parsed.progress && typeof parsed.progress === 'object'
               ? parsed.progress
               : {},
+          tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
           tab: TABS.some((t) => t.id === parsed.tab)
             ? parsed.tab
             : TABS[0].id,
@@ -806,7 +1881,10 @@ function GunlukPlanScreen() {
             lastRestoreAt: nowStamp,
           },
         }));
-        Alert.alert('Başarılı', 'Yedek verileri başarıyla geri yüklendi.');
+        Alert.alert(
+          'Başarılı',
+          'Alışkanlıklar ve görevler yedekten başarıyla geri yüklendi.'
+        );
       };
 
       if (Platform.OS === 'web' && typeof window !== 'undefined') {
@@ -850,6 +1928,24 @@ function GunlukPlanScreen() {
   const pct = tabHabits.length
     ? Math.round((doneToday / tabHabits.length) * 100)
     : 0;
+
+  // Aynı sekmede son madde de tamamlanınca (%100) kutlama: konfeti + hero zıplaması + titreşim
+  useEffect(() => {
+    const prev = prevDoneRef.current;
+    prevDoneRef.current = { tab: state.tab, done: doneToday };
+    if (!loaded || !prev || prev.tab !== state.tab) return;
+    if (
+      tabHabits.length > 0 &&
+      doneToday === tabHabits.length &&
+      prev.done < doneToday
+    ) {
+      setCelebrateKey((k) => k + 1);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
+        () => {}
+      );
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doneToday, tabHabits.length, state.tab, loaded]);
 
   const dim = daysInMonth(viewMonth.y, viewMonth.m);
   const isCurrentMonth =
@@ -970,6 +2066,30 @@ function GunlukPlanScreen() {
     );
   }
 
+  if (!onboardingDone || authScreenVisible) {
+    return (
+      <AuthScreen
+        onAuthenticated={handleUserAuthenticated}
+        onCancel={
+          onboardingDone ? () => setAuthScreenVisible(false) : undefined
+        }
+        initialDefaultFirstName={state.profile?.firstName || ''}
+        initialDefaultLastName={state.profile?.lastName || ''}
+      />
+    );
+  }
+
+  const activeSection: MainSection =
+    state.section === 'gorevler' ? 'gorevler' : 'rutin';
+  const allTasks = state.tasks || [];
+  const activeTasksAll = allTasks.filter((t) => !t.done);
+  const starredActiveCount = activeTasksAll.filter((t) => t.starred).length;
+  const displayedActiveTasks =
+    taskFilter === 'starred'
+      ? activeTasksAll.filter((t) => t.starred)
+      : activeTasksAll;
+  const completedTasks = allTasks.filter((t) => t.done);
+
   const daysArray = Array.from({ length: dim }, (_, idx) => idx + 1);
   const currentMenuMark = menuTarget
     ? getMark(menuTarget.habitId, menuTarget.dateStr)
@@ -1002,7 +2122,7 @@ function GunlukPlanScreen() {
     >
       <StatusBar style={theme.isDark ? 'light' : 'dark'} />
 
-      {/* Üst Başlık & Profil Dairesi */}
+      {/* Üst Başlık (Günlük Rutin | Görevler) & Profil Dairesi */}
       <View
         style={[
           styles.topbar,
@@ -1032,9 +2152,89 @@ function GunlukPlanScreen() {
               </Text>
             </TouchableOpacity>
           ) : (
-            <Text style={[styles.appTitle, { color: theme.muted }]}>
-              Günlük Plan
-            </Text>
+            <View style={styles.topModeTabs}>
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => handleSelectSection('rutin')}
+                style={[
+                  styles.topModeTabBtn,
+                  activeSection === 'rutin' && {
+                    borderBottomColor: theme.accent,
+                    backgroundColor: theme.isDark
+                      ? 'rgba(255,255,255,0.08)'
+                      : 'rgba(0,0,0,0.05)',
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.topModeTabText,
+                    {
+                      color: activeSection === 'rutin' ? theme.text : theme.muted,
+                      fontWeight: activeSection === 'rutin' ? '800' : '600',
+                    },
+                  ]}
+                >
+                  Günlük Rutin
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                activeOpacity={0.8}
+                onPress={() => handleSelectSection('gorevler')}
+                style={[
+                  styles.topModeTabBtn,
+                  activeSection === 'gorevler' && {
+                    borderBottomColor: theme.accent,
+                    backgroundColor: theme.isDark
+                      ? 'rgba(255,255,255,0.08)'
+                      : 'rgba(0,0,0,0.05)',
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.topModeTabText,
+                    {
+                      color:
+                        activeSection === 'gorevler' ? theme.text : theme.muted,
+                      fontWeight: activeSection === 'gorevler' ? '800' : '600',
+                    },
+                  ]}
+                >
+                  Görevler
+                </Text>
+                {activeTasksAll.length > 0 && (
+                  <View
+                    style={[
+                      styles.topModeBadge,
+                      {
+                        backgroundColor:
+                          activeSection === 'gorevler'
+                            ? theme.accent
+                            : theme.isDark
+                            ? 'rgba(255,255,255,0.14)'
+                            : 'rgba(0,0,0,0.1)',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.topModeBadgeText,
+                        {
+                          color:
+                            activeSection === 'gorevler'
+                              ? theme.accentInk
+                              : theme.text,
+                        },
+                      ]}
+                    >
+                      {activeTasksAll.length}
+                    </Text>
+                  </View>
+                )}
+              </TouchableOpacity>
+            </View>
           )}
         </View>
 
@@ -1127,12 +2327,18 @@ function GunlukPlanScreen() {
                   },
                 ]}
               >
-                {userFullName || 'Misafir Kullanıcı'}
+                {userFullName || authUser?.displayName || 'Misafir Kullanıcı'}
               </Text>
               <Text style={[styles.profileSubtitle, { color: theme.muted }]}>
-                {userFullName
-                  ? 'Günlük Plan Profili'
-                  : 'Aşağıdan adınızı ve soyadınızı kaydedebilirsiniz'}
+                {authUser && authUser.provider !== 'guest'
+                  ? `${
+                      authUser.provider === 'google'
+                        ? '🔵 Google Hesabı Bağlı'
+                        : authUser.provider === 'apple'
+                        ? ' Apple Hesabı Bağlı'
+                        : '✉️ E-posta Hesabı Bağlı'
+                    }${authUser.email ? ` · ${authUser.email}` : ''}`
+                  : '👤 Misafir Modu (Yalnızca Cihazda Saklanıyor)'}
               </Text>
 
               <View style={styles.profileStatsRow}>
@@ -1205,6 +2411,386 @@ function GunlukPlanScreen() {
                   </Text>
                 </View>
               </View>
+            </View>
+
+            {/* Hesap ve Bulut Senkronizasyonu Kartı */}
+            <View
+              style={[
+                styles.card,
+                styles.profileSectionCard,
+                {
+                  backgroundColor: theme.surface,
+                  borderRadius: theme.radius,
+                  borderColor: theme.cardBorderColor,
+                  borderWidth: theme.cardBorderWidth,
+                },
+              ]}
+            >
+              <Text
+                style={[
+                  styles.profileSectionTitle,
+                  {
+                    color: theme.text,
+                    fontStyle: theme.headItalic ? 'italic' : 'normal',
+                  },
+                ]}
+              >
+                ☁️ Hesap ve Bulut Yedekleme
+              </Text>
+              <Text
+                style={[styles.profileSectionDesc, { color: theme.muted }]}
+              >
+                Verileriniz her zaman önce telefonunuza (AsyncStorage) kaydedilir
+                ve internetsiz çalışır. Google, Apple veya E-posta hesabınızla
+                giriş yaptığınızda internet bağlantısı oldukça arka planda
+                otomatik olarak buluta yedeklenir ve yeni cihazınızda otomatik
+                indirilir.
+              </Text>
+
+              {/* Canlı Senkronizasyon Durum Kutusu */}
+              <View
+                style={[
+                  styles.backupInfoBox,
+                  {
+                    backgroundColor: theme.isDark
+                      ? 'rgba(255,255,255,0.04)'
+                      : 'rgba(0,0,0,0.03)',
+                    borderColor:
+                      cloudSyncStatus === 'synced'
+                        ? MARK_COLORS.green
+                        : cloudSyncStatus === 'offline-pending'
+                        ? '#f59e0b'
+                        : theme.isDark
+                        ? 'rgba(255,255,255,0.12)'
+                        : 'rgba(0,0,0,0.09)',
+                  },
+                ]}
+              >
+                <View style={styles.backupInfoRow}>
+                  <Text
+                    style={[styles.backupInfoLabel, { color: theme.muted }]}
+                  >
+                    Oturum Durumu:
+                  </Text>
+                  <Text style={[styles.backupInfoVal, { color: theme.text }]}>
+                    {authUser && authUser.provider !== 'guest'
+                      ? authUser.provider === 'google'
+                        ? 'Google ile Giriş Yapıldı'
+                        : authUser.provider === 'apple'
+                        ? 'Apple ile Giriş Yapıldı'
+                        : 'E-posta ile Giriş Yapıldı'
+                      : 'Misafir Modu'}
+                  </Text>
+                </View>
+
+                {authUser?.email && (
+                  <View style={styles.backupInfoRow}>
+                    <Text
+                      style={[styles.backupInfoLabel, { color: theme.muted }]}
+                    >
+                      Bağlı Hesap:
+                    </Text>
+                    <Text style={[styles.backupInfoVal, { color: theme.text }]}>
+                      {authUser.email}
+                    </Text>
+                  </View>
+                )}
+
+                <View style={styles.backupInfoRow}>
+                  <Text
+                    style={[styles.backupInfoLabel, { color: theme.muted }]}
+                  >
+                    Bulut Senkronizasyonu:
+                  </Text>
+                  <Text
+                    style={[
+                      styles.backupInfoVal,
+                      {
+                        color:
+                          cloudSyncStatus === 'synced'
+                            ? MARK_COLORS.green
+                            : cloudSyncStatus === 'syncing'
+                            ? '#3b82f6'
+                            : cloudSyncStatus === 'offline-pending'
+                            ? '#f59e0b'
+                            : theme.muted,
+                      },
+                    ]}
+                  >
+                    {!authUser || authUser.provider === 'guest'
+                      ? 'Kapalı (Misafir)'
+                      : cloudSyncStatus === 'syncing'
+                      ? '↻ Buluta Yedekleniyor...'
+                      : cloudSyncStatus === 'synced'
+                      ? '✓ Bulut ile Senkronize'
+                      : cloudSyncStatus === 'offline-pending'
+                      ? '⚡ Çevrimdışı (İnternet Bekleniyor)'
+                      : 'Hazır'}
+                  </Text>
+                </View>
+
+                <View style={styles.backupInfoRow}>
+                  <Text
+                    style={[styles.backupInfoLabel, { color: theme.muted }]}
+                  >
+                    Son Bulut Eşitleme:
+                  </Text>
+                  <Text style={[styles.backupInfoVal, { color: theme.text }]}>
+                    {state.profile?.lastCloudSyncAt || 'Henüz eşitlenmedi'}
+                  </Text>
+                </View>
+              </View>
+
+              {Boolean(cloudNoticeMsg) && (
+                <View
+                  style={[
+                    styles.profileSavedToast,
+                    {
+                      backgroundColor: 'rgba(59, 130, 246, 0.14)',
+                      borderColor: '#3b82f6',
+                      marginBottom: 10,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[styles.profileSavedToastText, { color: theme.text }]}
+                  >
+                    {cloudNoticeMsg}
+                  </Text>
+                </View>
+              )}
+
+              {!authUser || authUser.provider === 'guest' ? (
+                <TouchableOpacity
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    setAuthScreenVisible(true);
+                  }}
+                  activeOpacity={0.85}
+                  style={[
+                    styles.primaryBtn,
+                    styles.profileFullBtn,
+                    { backgroundColor: theme.accent },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.primaryBtnText,
+                      { color: theme.accentInk, fontSize: 15 },
+                    ]}
+                  >
+                    🔐 Google / Apple / E-posta ile Giriş Yap
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <View style={styles.profileBackupBtns}>
+                  <TouchableOpacity
+                    onPress={handleManualCloudBackup}
+                    activeOpacity={0.82}
+                    style={[
+                      styles.primaryBtn,
+                      styles.profileFullBtn,
+                      { backgroundColor: theme.accent },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.primaryBtnText,
+                        { color: theme.accentInk, fontSize: 15 },
+                      ]}
+                    >
+                      ☁️ Şimdi Buluta Yedekle
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={handleManualCloudRestore}
+                    activeOpacity={0.82}
+                    style={[
+                      styles.ghostBtn,
+                      styles.profileFullBtn,
+                      {
+                        borderColor: theme.accent,
+                        backgroundColor: theme.isDark
+                          ? 'rgba(255,255,255,0.04)'
+                          : 'rgba(0,0,0,0.02)',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.ghostBtnText,
+                        { color: theme.text, fontSize: 15 },
+                      ]}
+                    >
+                      📥 Buluttaki Yedeği Şimdi İndir
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={handleSignOut}
+                    activeOpacity={0.82}
+                    style={[
+                      styles.ghostBtn,
+                      styles.profileFullBtn,
+                      {
+                        borderColor: MARK_COLORS.red,
+                        backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.ghostBtnText,
+                        { color: MARK_COLORS.red, fontSize: 14 },
+                      ]}
+                    >
+                      🚪 Çıkış Yap / Hesap Değiştir
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {/* İsteğe Bağlı Firebase Bulut Veritabanı Ayarları (Daraltılabilir) */}
+              <TouchableOpacity
+                onPress={() => {
+                  Haptics.selectionAsync().catch(() => {});
+                  setFirebaseSettingsOpen((prev) => !prev);
+                }}
+                activeOpacity={0.75}
+                style={{ marginTop: 14, paddingVertical: 6 }}
+              >
+                <Text
+                  style={{
+                    color: theme.muted,
+                    fontSize: 12.5,
+                    fontWeight: '700',
+                    textAlign: 'center',
+                  }}
+                >
+                  {firebaseSettingsOpen ? '▾' : '▸'} ⚙️ Firebase Bulut Veritabanı
+                  Bağlantı Ayarları{' '}
+                  {isFirebaseConfigured(fbConfig) ? '(Aktif)' : '(Simülasyon Modu)'}
+                </Text>
+              </TouchableOpacity>
+
+              {firebaseSettingsOpen && (
+                <View
+                  style={{
+                    marginTop: 8,
+                    paddingTop: 10,
+                    borderTopWidth: 1,
+                    borderTopColor: theme.isDark
+                      ? 'rgba(255,255,255,0.1)'
+                      : 'rgba(0,0,0,0.08)',
+                  }}
+                >
+                  <Text
+                    style={[
+                      styles.profileSectionDesc,
+                      { color: theme.muted, marginBottom: 8 },
+                    ]}
+                  >
+                    Kendi Firebase (Firestore & Auth) projenize bağlamak için
+                    Firebase Console üzerindeki Web API Anahtarınızı (apiKey) ve
+                    Proje Kimliğinizi (projectId) girebilirsiniz. Boş
+                    bırakıldığında uygulama hesap bazlı yerel bulut kasasını
+                    kullanır.
+                  </Text>
+
+                  <Text style={[styles.inputLabel, { color: theme.text }]}>
+                    Firebase Project ID
+                  </Text>
+                  <TextInput
+                    value={fbConfig.projectId}
+                    onChangeText={(v) =>
+                      setFbConfig((prev) => ({ ...prev, projectId: v }))
+                    }
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder="ornek: gunluk-plan-app"
+                    placeholderTextColor={theme.muted}
+                    style={[
+                      styles.textInput,
+                      {
+                        color: theme.text,
+                        backgroundColor: theme.isDark
+                          ? 'rgba(255,255,255,0.06)'
+                          : 'rgba(0,0,0,0.04)',
+                        borderColor: theme.isDark
+                          ? 'rgba(255,255,255,0.18)'
+                          : 'rgba(0,0,0,0.15)',
+                      },
+                    ]}
+                  />
+
+                  <Text style={[styles.inputLabel, { color: theme.text }]}>
+                    Firebase Web API Key
+                  </Text>
+                  <TextInput
+                    value={fbConfig.apiKey}
+                    onChangeText={(v) =>
+                      setFbConfig((prev) => ({ ...prev, apiKey: v }))
+                    }
+                    autoCapitalize="none"
+                    autoCorrect={false}
+                    placeholder="AIzaSy..."
+                    placeholderTextColor={theme.muted}
+                    style={[
+                      styles.textInput,
+                      {
+                        color: theme.text,
+                        backgroundColor: theme.isDark
+                          ? 'rgba(255,255,255,0.06)'
+                          : 'rgba(0,0,0,0.04)',
+                        borderColor: theme.isDark
+                          ? 'rgba(255,255,255,0.18)'
+                          : 'rgba(0,0,0,0.15)',
+                      },
+                    ]}
+                  />
+
+                  <TouchableOpacity
+                    onPress={handleSaveFirebaseSettings}
+                    activeOpacity={0.82}
+                    style={[
+                      styles.primaryBtn,
+                      styles.profileFullBtn,
+                      { backgroundColor: theme.accent, marginTop: 10 },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.primaryBtnText,
+                        { color: theme.accentInk, fontSize: 14 },
+                      ]}
+                    >
+                      ✓ Bulut Bağlantı Ayarlarını Kaydet
+                    </Text>
+                  </TouchableOpacity>
+
+                  {fbConfigSavedBanner && (
+                    <View
+                      style={[
+                        styles.profileSavedToast,
+                        {
+                          backgroundColor: 'rgba(34, 197, 94, 0.15)',
+                          borderColor: MARK_COLORS.green,
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.profileSavedToastText,
+                          { color: MARK_COLORS.green },
+                        ]}
+                      >
+                        ✓ Firebase bulut yapılandırması kaydedildi.
+                      </Text>
+                    </View>
+                  )}
+                </View>
+              )}
             </View>
 
             {/* Ad Soyad Girme ve Kaydetme Kartı */}
@@ -1345,11 +2931,11 @@ function GunlukPlanScreen() {
               <Text
                 style={[styles.profileSectionDesc, { color: theme.muted }]}
               >
-                Tüm alışkanlıklarınız, zincirleriniz, sayaç/miktar kayıtlarınız
-                ve profil bilgileriniz cihazınızda saklanır. Veri kaybını
-                önlemek veya başka bir cihaza geçmek için verilerinizi
-                yedekleyebilir ve istediğiniz zaman yedekten geri
-                yükleyebilirsiniz.
+                Tüm alışkanlıklarınız, görevlerinizdeki maddeler, alt
+                görevleriniz, zincirleriniz, sayaç/miktar kayıtlarınız ve profil
+                bilgileriniz cihazınızda saklanır. Veri kaybını önlemek veya
+                başka bir cihaza geçmek için tüm verilerinizi yedekleyebilir ve
+                istediğiniz zaman yedekten geri yükleyebilirsiniz.
               </Text>
 
               <View
@@ -1373,6 +2959,17 @@ function GunlukPlanScreen() {
                   </Text>
                   <Text style={[styles.backupInfoVal, { color: theme.text }]}>
                     {state.habits.length} madde ({TABS.length} kategori)
+                  </Text>
+                </View>
+                <View style={styles.backupInfoRow}>
+                  <Text
+                    style={[styles.backupInfoLabel, { color: theme.muted }]}
+                  >
+                    Kayıtlı Görevler:
+                  </Text>
+                  <Text style={[styles.backupInfoVal, { color: theme.text }]}>
+                    {allTasks.length} madde ({activeTasksAll.length} aktif,{' '}
+                    {completedTasks.length} tamamlanan)
                   </Text>
                 </View>
                 <View style={styles.backupInfoRow}>
@@ -1455,14 +3052,720 @@ function GunlukPlanScreen() {
             </View>
           </ScrollView>
         </KeyboardAvoidingView>
+      ) : activeSection === 'gorevler' ? (
+        /* Görevler (Google Görevler Benzeri Görünüm) */
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+          style={{ flex: 1 }}
+        >
+          <ScrollView
+            style={styles.mainScroll}
+            contentContainerStyle={styles.mainContent}
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+          >
+            {/* Görevler Üst Özet & Filtre Barı */}
+            <View
+              style={[
+                styles.hero,
+                {
+                  backgroundColor: '#950101',
+                  borderColor: '#FF0000',
+                  borderWidth: 1.5,
+                  borderRadius: theme.radius,
+                },
+              ]}
+            >
+              <View style={styles.heroTop}>
+                <Text style={styles.heroEmoji}>✅</Text>
+                <View style={styles.heroTextWrap}>
+                  <Text
+                    style={[
+                      styles.heroTitle,
+                      {
+                        color: theme.accentInk,
+                        fontStyle: theme.headItalic ? 'italic' : 'normal',
+                      },
+                    ]}
+                  >
+                    Görevlerim
+                  </Text>
+                  <Text style={[styles.heroMotto, { color: theme.accentInk }]}>
+                    Yapılacakları ekle, alt görevlere böl ve tamamla.
+                  </Text>
+                </View>
+              </View>
+
+              <View style={styles.progressRow}>
+                <Text style={[styles.progressLabel, { color: theme.accentInk }]}>
+                  Tamamlanan {completedTasks.length}/{allTasks.length}
+                </Text>
+                <View
+                  style={[
+                    styles.progressBarBg,
+                    {
+                      backgroundColor: '#3D0000',
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.progressBarFill,
+                      {
+                        width: `${
+                          allTasks.length
+                            ? Math.round(
+                                (completedTasks.length / allTasks.length) * 100
+                              )
+                            : 0
+                        }%`,
+                        backgroundColor: '#FF0000',
+                      },
+                    ]}
+                  />
+                </View>
+                <Text style={[styles.progressLabel, { color: theme.accentInk }]}>
+                  %
+                  {allTasks.length
+                    ? Math.round((completedTasks.length / allTasks.length) * 100)
+                    : 0}
+                </Text>
+              </View>
+            </View>
+
+            {/* Google Görevler Liste Sekmeleri (Görevlerim / ★ Yıldızlı) & Eylemler */}
+            <View style={styles.toolbar}>
+              <View style={styles.taskFilterTabs}>
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    setTaskFilter('all');
+                  }}
+                  style={[
+                    styles.taskFilterBtn,
+                    {
+                      backgroundColor:
+                        taskFilter === 'all' ? '#FF0000' : '#3D0000',
+                      borderColor: taskFilter === 'all' ? '#FF0000' : '#950101',
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.taskFilterBtnText,
+                      {
+                        color:
+                          taskFilter === 'all' ? theme.accentInk : theme.text,
+                      },
+                    ]}
+                  >
+                    Görevlerim ({activeTasksAll.length})
+                  </Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  activeOpacity={0.8}
+                  onPress={() => {
+                    Haptics.selectionAsync().catch(() => {});
+                    setTaskFilter('starred');
+                  }}
+                  style={[
+                    styles.taskFilterBtn,
+                    {
+                      backgroundColor:
+                        taskFilter === 'starred' ? '#FF0000' : '#3D0000',
+                      borderColor:
+                        taskFilter === 'starred' ? '#FF0000' : '#950101',
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.taskFilterBtnText,
+                      {
+                        color:
+                          taskFilter === 'starred'
+                            ? theme.accentInk
+                            : theme.text,
+                      },
+                    ]}
+                  >
+                    ★ Yıldızlı ({starredActiveCount})
+                  </Text>
+                </TouchableOpacity>
+              </View>
+
+              <View style={styles.toolbarRight}>
+                { taskFilter === 'all' &&
+                  (activeTasksAll.length > 1 || taskReorderMode) && (
+                    <TouchableOpacity
+                      onPress={() => {
+                        Haptics.selectionAsync().catch(() => {});
+                        setTaskReorderMode((v) => !v);
+                      }}
+                      style={[
+                        taskReorderMode ? styles.primaryBtn : styles.pillBtn,
+                        taskReorderMode
+                          ? { backgroundColor: theme.accent }
+                          : {
+                              backgroundColor: theme.surface,
+                              borderColor: theme.accent,
+                            },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.pillBtnText,
+                          {
+                            color: taskReorderMode
+                              ? theme.accentInk
+                              : theme.text,
+                          },
+                        ]}
+                      >
+                        {taskReorderMode ? '✓ Bitti' : '⇅ Sırala'}
+                      </Text>
+                    </TouchableOpacity>
+                  )}
+
+                {!taskReorderMode && (
+                  <TouchableOpacity
+                    onPress={() => openTaskModal(null)}
+                    style={[
+                      styles.primaryBtn,
+                      { backgroundColor: theme.accent },
+                    ]}
+                  >
+                    <Text
+                      style={[styles.primaryBtnText, { color: theme.accentInk }]}
+                    >
+                      ＋ Madde ekle
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            </View>
+
+            {/* Hızlı Görev Ekleme Çubuğu (Google Tasks Tarzı) */}
+            {!taskReorderMode && (
+              <View
+                style={[
+                  styles.card,
+                  styles.quickTaskBar,
+                  {
+                    backgroundColor: theme.surface,
+                    borderRadius: theme.radius,
+                    borderColor: theme.cardBorderColor,
+                    borderWidth: theme.cardBorderWidth,
+                  },
+                ]}
+              >
+                <View
+                  style={[
+                    styles.taskCircleCheck,
+                    {
+                      borderColor: theme.accent,
+                      opacity: 0.7,
+                    },
+                  ]}
+                >
+                  <Text
+                    style={{
+                      color: theme.accent,
+                      fontSize: 14,
+                      fontWeight: '800',
+                    }}
+                  >
+                    ＋
+                  </Text>
+                </View>
+                <TextInput
+                  value={quickTaskTitle}
+                  onChangeText={setQuickTaskTitle}
+                  maxLength={100}
+                  placeholder={
+                    taskFilter === 'starred'
+                      ? 'Yıldızlı yeni görev ekle...'
+                      : 'Yeni bir görev ekle...'
+                  }
+                  placeholderTextColor={theme.muted}
+                  onSubmitEditing={handleQuickAddTask}
+                  returnKeyType="done"
+                  style={[styles.quickTaskInput, { color: theme.text }]}
+                />
+                {quickTaskTitle.trim().length > 0 && (
+                  <TouchableOpacity
+                    onPress={handleQuickAddTask}
+                    style={[
+                      styles.primaryBtn,
+                      {
+                        backgroundColor: theme.accent,
+                        paddingVertical: 6,
+                        paddingHorizontal: 12,
+                      },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.primaryBtnText,
+                        { color: theme.accentInk, fontSize: 13 },
+                      ]}
+                    >
+                      Ekle
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </View>
+            )}
+
+            {/* Aktif Görevler Listesi */}
+            {displayedActiveTasks.length === 0 ? (
+              <View
+                style={[
+                  styles.emptyBox,
+                  {
+                    borderRadius: theme.radius,
+                    borderColor: theme.isDark
+                      ? 'rgba(255,255,255,0.2)'
+                      : 'rgba(0,0,0,0.18)',
+                  },
+                ]}
+              >
+                <Text style={[styles.emptyText, { color: theme.muted }]}>
+                  {taskFilter === 'starred'
+                    ? 'Henüz yıldızlı görev yok. Görevlerin yanındaki ☆ simgesine dokunarak önemli görevleri buraya sabitleyebilirsin.'
+                    : 'Yapılacak görev yok. Yukarıdan hızlıca yazabilir veya “＋ Madde ekle” ile detaylı görev oluşturabilirsin.'}
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.cardsList}>
+                {displayedActiveTasks.map((task, idx) => {
+                  if (taskReorderMode) {
+                    return (
+                      <View
+                        key={task.id}
+                        style={[
+                          styles.card,
+                          styles.compactCard,
+                          {
+                            backgroundColor: theme.surface,
+                            borderRadius: theme.radius,
+                            borderColor: theme.cardBorderColor,
+                            borderWidth: theme.cardBorderWidth,
+                            borderLeftWidth: theme.leftAccentBar
+                              ? 6
+                              : theme.cardBorderWidth,
+                            borderLeftColor:
+                              theme.leftAccentBar || theme.cardBorderColor,
+                          },
+                        ]}
+                      >
+                        <View
+                          style={[
+                            styles.dragHandleBadge,
+                            {
+                              backgroundColor: theme.isDark
+                                ? 'rgba(255,255,255,0.08)'
+                                : 'rgba(0,0,0,0.06)',
+                            },
+                          ]}
+                        >
+                          <Text style={{ color: theme.muted, fontSize: 18 }}>
+                            ⠿
+                          </Text>
+                        </View>
+                        <View style={styles.compactInfo}>
+                          <Text
+                            style={[
+                              styles.cardTitle,
+                              {
+                                color: theme.text,
+                                fontStyle: theme.headItalic
+                                  ? 'italic'
+                                  : 'normal',
+                              },
+                            ]}
+                          >
+                            {task.title}
+                          </Text>
+                          {!!task.detail && (
+                            <Text
+                              style={[
+                                styles.cardDetail,
+                                { color: theme.muted },
+                              ]}
+                            >
+                              {task.detail}
+                            </Text>
+                          )}
+                        </View>
+                        <TouchableOpacity
+                          disabled={idx === 0}
+                          onPress={() => moveTask(task.id, -1)}
+                          style={[
+                            styles.iconBtn,
+                            {
+                              backgroundColor: theme.surface,
+                              borderColor: theme.isDark
+                                ? 'rgba(255,255,255,0.18)'
+                                : 'rgba(0,0,0,0.15)',
+                              opacity: idx === 0 ? 0.3 : 1,
+                            },
+                          ]}
+                        >
+                          <Text style={{ color: theme.text, fontSize: 13 }}>
+                            ▲
+                          </Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity
+                          disabled={idx === displayedActiveTasks.length - 1}
+                          onPress={() => moveTask(task.id, 1)}
+                          style={[
+                            styles.iconBtn,
+                            {
+                              backgroundColor: theme.surface,
+                              borderColor: theme.isDark
+                                ? 'rgba(255,255,255,0.18)'
+                                : 'rgba(0,0,0,0.15)',
+                              opacity:
+                                idx === displayedActiveTasks.length - 1
+                                  ? 0.3
+                                  : 1,
+                            },
+                          ]}
+                        >
+                          <Text style={{ color: theme.text, fontSize: 13 }}>
+                            ▼
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    );
+                  }
+
+                  const subtasks = task.subtasks || [];
+                  const isCompleting = completingTaskIds.includes(task.id);
+                  return (
+                    <FadeSlideIn key={task.id} index={idx}>
+                    <View
+                      style={[
+                        styles.card,
+                        styles.taskCard,
+                        {
+                          backgroundColor: theme.surface,
+                          borderRadius: theme.radius,
+                          borderColor: theme.cardBorderColor,
+                          borderWidth: theme.cardBorderWidth,
+                          borderLeftWidth: theme.leftAccentBar
+                            ? 6
+                            : theme.cardBorderWidth,
+                          borderLeftColor:
+                            theme.leftAccentBar || theme.cardBorderColor,
+                          opacity: isCompleting ? 0.7 : 1,
+                        },
+                      ]}
+                    >
+                      <View style={styles.taskMainRow}>
+                        {/* Yuvarlak Onay Kutusu (Google Tasks tarzı) */}
+                        <AnimatedCheckCircle
+                          checked={isCompleting}
+                          color={MARK_COLORS.green}
+                          borderColor={theme.accent}
+                          onPress={() => handleCompleteTaskAnimated(task.id)}
+                          accessibilityLabel={`${task.title} görevini tamamla`}
+                          style={styles.taskCircleCheck}
+                          tickStyle={styles.taskCircleTick}
+                        />
+
+                        {/* Görev Başlığı, Açıklaması ve Tarih Etiketi */}
+                        <Pressable
+                          onPress={() => openTaskModal(task)}
+                          onLongPress={() => openTaskModal(task)}
+                          style={({ pressed }) => [
+                            styles.taskBodyPressable,
+                            { opacity: pressed ? 0.75 : 1 },
+                          ]}
+                        >
+                          <Text
+                            style={[
+                              styles.taskItemTitle,
+                              {
+                                color: isCompleting ? theme.muted : theme.text,
+                                textDecorationLine: isCompleting
+                                  ? 'line-through'
+                                  : 'none',
+                                fontStyle: theme.headItalic
+                                  ? 'italic'
+                                  : 'normal',
+                              },
+                            ]}
+                          >
+                            {task.title}
+                          </Text>
+                          {!!task.detail && (
+                            <Text
+                              style={[
+                                styles.taskItemDetail,
+                                { color: theme.muted },
+                              ]}
+                            >
+                              {task.detail}
+                            </Text>
+                          )}
+                          {!!task.dueDate && (
+                            <View style={styles.taskMetaRow}>
+                              <View
+                                style={[
+                                  styles.taskDateChip,
+                                  {
+                                    borderColor: theme.accent,
+                                    backgroundColor: theme.isDark
+                                      ? 'rgba(255,255,255,0.06)'
+                                      : 'rgba(0,0,0,0.04)',
+                                  },
+                                ]}
+                              >
+                                <Text
+                                  style={[
+                                    styles.taskDateChipText,
+                                    { color: theme.text },
+                                  ]}
+                                >
+                                  📅 {task.dueDate}
+                                </Text>
+                              </View>
+                            </View>
+                          )}
+                        </Pressable>
+
+                        {/* Yıldız (Önemli) Butonu */}
+                        <TouchableOpacity
+                          onPress={() => handleToggleTaskStar(task.id)}
+                          accessibilityLabel="Yıldızla"
+                          style={styles.taskStarBtn}
+                        >
+                          <Text
+                            style={[
+                              styles.taskStarIcon,
+                              {
+                                color: task.starred
+                                  ? '#f59e0b'
+                                  : theme.muted,
+                              },
+                            ]}
+                          >
+                            {task.starred ? '★' : '☆'}
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+
+                      {/* Alt Görevler (Google Tasks gibi girintili) */}
+                      {subtasks.length > 0 && (
+                        <View style={styles.taskSubtasksContainer}>
+                          {subtasks.map((st) => (
+                            <TouchableOpacity
+                              key={st.id}
+                              activeOpacity={0.75}
+                              onPress={() =>
+                                handleToggleTaskSubtaskOnCard(task.id, st.id)
+                              }
+                              style={styles.taskSubtaskRow}
+                            >
+                              <View
+                                style={[
+                                  styles.taskSubCircle,
+                                  {
+                                    borderColor: st.done
+                                      ? MARK_COLORS.green
+                                      : theme.muted,
+                                    backgroundColor: st.done
+                                      ? MARK_COLORS.green
+                                      : 'transparent',
+                                  },
+                                ]}
+                              >
+                                {st.done && (
+                                  <Text style={styles.taskSubCircleTick}>
+                                    ✓
+                                  </Text>
+                                )}
+                              </View>
+                              <Text
+                                style={[
+                                  styles.taskSubtaskText,
+                                  {
+                                    color: st.done ? theme.muted : theme.text,
+                                    textDecorationLine: st.done
+                                      ? 'line-through'
+                                      : 'none',
+                                  },
+                                ]}
+                              >
+                                {st.title}
+                              </Text>
+                            </TouchableOpacity>
+                          ))}
+                        </View>
+                      )}
+                    </View>
+                    </FadeSlideIn>
+                  );
+                })}
+              </View>
+            )}
+
+            {/* Tamamlananlar Bölümü (Google Görevler gibi açılır/kapanır) */}
+            {completedTasks.length > 0 && (
+              <View
+                style={[
+                  styles.card,
+                  styles.completedSectionCard,
+                  {
+                    backgroundColor: theme.surface,
+                    borderRadius: theme.radius,
+                    borderColor: theme.cardBorderColor,
+                    borderWidth: theme.cardBorderWidth,
+                  },
+                ]}
+              >
+                <View style={styles.completedHeaderRow}>
+                  <TouchableOpacity
+                    activeOpacity={0.75}
+                    onPress={() => {
+                      Haptics.selectionAsync().catch(() => {});
+                      animateLayout('ease');
+                      setCompletedExpanded((v) => !v);
+                    }}
+                    style={styles.completedToggleBtn}
+                  >
+                    <Text
+                      style={[
+                        styles.completedHeaderTitle,
+                        { color: theme.text },
+                      ]}
+                    >
+                      {completedExpanded ? '▾' : '▸'} Tamamlananlar (
+                      {completedTasks.length})
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    onPress={handleClearCompletedTasks}
+                    style={styles.clearCompletedBtn}
+                  >
+                    <Text
+                      style={[
+                        styles.clearCompletedText,
+                        { color: MARK_COLORS.red },
+                      ]}
+                    >
+                      Tümünü sil
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+
+                {completedExpanded && (
+                  <View style={styles.completedList}>
+                    {completedTasks.map((task) => (
+                      <View
+                        key={task.id}
+                        style={[
+                          styles.completedTaskRow,
+                          {
+                            borderTopColor: theme.isDark
+                              ? 'rgba(255,255,255,0.08)'
+                              : 'rgba(0,0,0,0.06)',
+                          },
+                        ]}
+                      >
+                        <TouchableOpacity
+                          onPress={() => handleToggleTaskDone(task.id)}
+                          style={[
+                            styles.taskCircleCheck,
+                            {
+                              borderColor: MARK_COLORS.green,
+                              backgroundColor: MARK_COLORS.green,
+                            },
+                          ]}
+                        >
+                          <Text style={styles.taskCircleTick}>✓</Text>
+                        </TouchableOpacity>
+
+                        <Pressable
+                          onPress={() => openTaskModal(task)}
+                          style={styles.taskBodyPressable}
+                        >
+                          <Text
+                            style={[
+                              styles.taskItemTitle,
+                              {
+                                color: theme.muted,
+                                textDecorationLine: 'line-through',
+                              },
+                            ]}
+                          >
+                            {task.title}
+                          </Text>
+                          {!!task.detail && (
+                            <Text
+                              style={[
+                                styles.taskItemDetail,
+                                {
+                                  color: theme.muted,
+                                  textDecorationLine: 'line-through',
+                                  opacity: 0.75,
+                                },
+                              ]}
+                            >
+                              {task.detail}
+                            </Text>
+                          )}
+                        </Pressable>
+
+                        <TouchableOpacity
+                          onPress={() => handleDeleteSingleTask(task.id)}
+                          accessibilityLabel="Görevi sil"
+                          style={styles.taskDeleteIconBtn}
+                        >
+                          <Text style={{ color: theme.muted, fontSize: 15 }}>
+                            ✕
+                          </Text>
+                        </TouchableOpacity>
+                      </View>
+                    ))}
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* Görevler Alt Bilgi */}
+            <View style={styles.footer}>
+              <View style={styles.legendRow}>
+                <View style={styles.legendItem}>
+                  <View
+                    style={[
+                      styles.dotSmall,
+                      { backgroundColor: MARK_COLORS.green },
+                    ]}
+                  />
+                  <Text style={[styles.legendText, { color: theme.muted }]}>
+                    Daire: dokun tamamla · Görev: dokun detay & alt görev ekle
+                  </Text>
+                </View>
+              </View>
+            </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       ) : (
-        /* Ana İçerik */
+        /* Ana İçerik (Günlük Rutin) */
         <ScrollView
           style={styles.mainScroll}
           contentContainerStyle={styles.mainContent}
         showsVerticalScrollIndicator={false}
       >
         {/* Hero Kartı */}
+        <FadeSlideIn key={`hero-${activeTab.id}`} style={styles.heroLayer}>
+        <PopOnChange value={celebrateKey} scaleTo={1.035}>
         <View
           style={[
             styles.hero,
@@ -1489,7 +3792,9 @@ function GunlukPlanScreen() {
                 {activeTab.name}
               </Text>
               <Text style={[styles.heroMotto, { color: theme.accentInk }]}>
-                {activeTab.motto}
+                {pct === 100 && tabHabits.length > 0
+                  ? '🎉 Bugünün tüm maddeleri tamam. Harikasın!'
+                  : activeTab.motto}
               </Text>
             </View>
           </View>
@@ -1498,8 +3803,15 @@ function GunlukPlanScreen() {
             <Text style={[styles.progressLabel, { color: theme.accentInk }]}>
               Bugün {doneToday}/{tabHabits.length}
             </Text>
-            <View
-              style={[
+            <AnimatedProgressBar
+              pct={pct}
+              fillColor={theme.accentInk}
+              shimmerColor={
+                theme.accentInk === '#ffffff'
+                  ? withAlpha(theme.accent, 0.45)
+                  : 'rgba(255,255,255,0.45)'
+              }
+              trackStyle={[
                 styles.progressBarBg,
                 {
                   backgroundColor:
@@ -1508,22 +3820,36 @@ function GunlukPlanScreen() {
                       : 'rgba(255,255,255,0.28)',
                 },
               ]}
-            >
-              <View
-                style={[
-                  styles.progressBarFill,
-                  {
-                    width: `${pct}%`,
-                    backgroundColor: theme.accentInk,
-                  },
-                ]}
-              />
-            </View>
-            <Text style={[styles.progressLabel, { color: theme.accentInk }]}>
-              %{pct}
-            </Text>
+            />
+            <AnimatedNumber
+              value={pct}
+              prefix="%"
+              style={[
+                styles.progressLabel,
+                styles.progressPct,
+                { color: theme.accentInk },
+              ]}
+            />
           </View>
+
+          <ConfettiBurst
+            trigger={celebrateKey}
+            colors={[
+              theme.accentInk,
+              MARK_COLORS.green,
+              '#facc15',
+              MARK_COLORS.blue,
+              '#ec4899',
+              '#f97316',
+            ]}
+            count={30}
+            spread={150}
+            size={8}
+            duration={1300}
+          />
         </View>
+        </PopOnChange>
+        </FadeSlideIn>
 
         {/* Araç Çubuğu (Ay Seçimi + Sırala + Madde Ekle) */}
         <View style={styles.toolbar}>
@@ -1595,6 +3921,7 @@ function GunlukPlanScreen() {
               <TouchableOpacity
                 onPress={() => {
                   Haptics.selectionAsync().catch(() => {});
+                  animateLayout();
                   setReorderMode((v) => !v);
                 }}
                 style={[
@@ -1651,6 +3978,7 @@ function GunlukPlanScreen() {
               },
             ]}
           >
+            <FloatingEmoji emoji={activeTab.emoji} />
             <Text style={[styles.emptyText, { color: theme.muted }]}>
               Bu sekmede henüz madde yok. “Madde ekle” ile başla.
             </Text>
@@ -1779,8 +4107,9 @@ function GunlukPlanScreen() {
               }
 
               return (
-                <Pressable
-                  key={h.id}
+                <FadeSlideIn key={h.id} index={i}>
+                <PressableScale
+                  scaleTo={0.985}
                   onPress={() => handleCardPress(h)}
                   onLongPress={() => openEditor(h)}
                   delayLongPress={380}
@@ -1796,21 +4125,13 @@ function GunlukPlanScreen() {
                         : theme.cardBorderWidth,
                       borderLeftColor:
                         theme.leftAccentBar || theme.cardBorderColor,
-                      opacity: pressed ? 0.92 : 1,
+                      opacity: pressed ? 0.94 : 1,
                     },
                   ]}
                 >
                   {/* Kart Üst Kısmı (Basılı tut: Düzenle · Dokun: Sayaç / Miktar) */}
                   <View style={styles.cardHead}>
-                    <Pressable
-                      onPress={() => handleCardPress(h)}
-                      onLongPress={() => openEditor(h)}
-                      delayLongPress={380}
-                      style={({ pressed }) => [
-                        styles.cardInfo,
-                        { opacity: pressed ? 0.78 : 1 },
-                      ]}
-                    >
+                    <View style={styles.cardInfo}>
                       <View style={styles.cardTitleGroup}>
                         <Text
                           style={[
@@ -1832,13 +4153,16 @@ function GunlukPlanScreen() {
                         )}
                       </View>
                       <View style={styles.cardStats}>
-                        <Text style={[styles.statText, { color: theme.muted }]}>
-                          🔗 Zincir:{' '}
-                          <Text style={[styles.statBold, { color: theme.text }]}>
-                            {cur}
-                          </Text>{' '}
-                          gün
-                        </Text>
+                        <View style={styles.statWithIcon}>
+                          <StreakIcon streak={cur} style={styles.statIcon} />
+                          <Text style={[styles.statText, { color: theme.muted }]}>
+                            Zincir:{' '}
+                            <Text style={[styles.statBold, { color: theme.text }]}>
+                              {cur}
+                            </Text>{' '}
+                            gün
+                          </Text>
+                        </View>
                         <Text style={[styles.statText, { color: theme.muted }]}>
                           🏆 En uzun:{' '}
                           <Text style={[styles.statBold, { color: theme.text }]}>
@@ -1874,11 +4198,23 @@ function GunlukPlanScreen() {
                           </View>
                         )}
                       </View>
-                    </Pressable>
+                    </View>
 
                     {/* Bugün Butonu */}
                     <View style={styles.cardActions}>
                       <View style={styles.todayBtnWrap}>
+                        <MarkPop
+                          mark={todayMark}
+                          color={todayMarkObj?.color}
+                          radiusStyle={getCellRadiusStyle(46)}
+                          burst
+                          burstColors={[
+                            MARK_COLORS.green,
+                            theme.accent,
+                            '#facc15',
+                            '#ffffff',
+                          ]}
+                        >
                         <Pressable
                           onPress={() => handleCellPress(h, today.key)}
                           onLongPress={() => handleCellLongPress(h, today.key)}
@@ -1915,6 +4251,7 @@ function GunlukPlanScreen() {
                             </Text>
                           )}
                         </Pressable>
+                        </MarkPop>
                         <View
                           pointerEvents="none"
                           style={[
@@ -1951,8 +4288,14 @@ function GunlukPlanScreen() {
                       const isToday = k === today.key;
 
                       return (
+                        <MarkPop
+                          key={k}
+                          mark={mark}
+                          color={markObj?.color}
+                          radiusStyle={getCellRadiusStyle(cellSize)}
+                          ringScale={1.42}
+                        >
                         <Pressable
-                          key={d}
                           disabled={isFuture}
                           onPress={() => handleCellPress(h, k)}
                           onLongPress={() => handleCellLongPress(h, k)}
@@ -1993,10 +4336,12 @@ function GunlukPlanScreen() {
                             </Text>
                           )}
                         </Pressable>
+                        </MarkPop>
                       );
                     })}
                   </HabitWeekScroll>
-                </Pressable>
+                </PressableScale>
+                </FadeSlideIn>
               );
             })}
           </View>
@@ -2049,7 +4394,8 @@ function GunlukPlanScreen() {
             const done = hs.filter(
               (h) => getMark(h.id, today.key) === 'g'
             ).length;
-            const selected = !profileOpen && t.id === state.tab;
+            const selected =
+              !profileOpen && activeSection === 'rutin' && t.id === state.tab;
             return (
               <TouchableOpacity
                 key={t.id}
@@ -2065,7 +4411,9 @@ function GunlukPlanScreen() {
                   },
                 ]}
               >
-                <Text style={styles.tabEmoji}>{t.emoji}</Text>
+                <PopOnChange value={selected} when={selected} scaleTo={1.32} lift={5}>
+                  <Text style={styles.tabEmoji}>{t.emoji}</Text>
+                </PopOnChange>
                 <Text
                   numberOfLines={1}
                   style={[
@@ -2100,7 +4448,7 @@ function GunlukPlanScreen() {
           style={styles.modalBackdrop}
           onPress={() => setMenuTarget(null)}
         >
-          <Pressable
+          <SheetPressable
             style={[
               styles.menuSheet,
               {
@@ -2187,7 +4535,7 @@ function GunlukPlanScreen() {
                 </TouchableOpacity>
               </>
             )}
-          </Pressable>
+          </SheetPressable>
         </Pressable>
       </Modal>
 
@@ -2206,7 +4554,7 @@ function GunlukPlanScreen() {
             style={styles.modalBackdropInner}
             onPress={() => setEditorOpen(false)}
           >
-            <Pressable
+            <SheetPressable
               style={[
                 styles.editorCard,
                 {
@@ -2286,52 +4634,62 @@ function GunlukPlanScreen() {
                 <Text style={[styles.inputLabel, { color: theme.text }]}>
                   Sayaç / Tekrar / Miktar
                 </Text>
-                <View style={styles.goalTypeRow}>
+                <View style={styles.goalTypeGrid}>
                   {(
                     [
-                      { id: 'none', label: 'Yok' },
-                      { id: 'timer', label: '⏱️ Sayaç' },
-                      { id: 'reps', label: '🔁 Tekrar' },
-                      { id: 'amount', label: '📊 Miktar' },
-                    ] as { id: GoalType; label: string }[]
-                  ).map((opt) => {
-                    const active = goalType === opt.id;
-                    return (
-                      <TouchableOpacity
-                        key={opt.id}
-                        onPress={() => {
-                          Haptics.selectionAsync().catch(() => {});
-                          setGoalType(opt.id);
-                        }}
-                        style={[
-                          styles.goalTypeBtn,
-                          {
-                            backgroundColor: active
-                              ? theme.accent
-                              : theme.isDark
-                              ? 'rgba(255,255,255,0.06)'
-                              : 'rgba(0,0,0,0.05)',
-                            borderColor: active
-                              ? theme.accent
-                              : theme.isDark
-                              ? 'rgba(255,255,255,0.16)'
-                              : 'rgba(0,0,0,0.12)',
-                          },
-                        ]}
-                      >
-                        <Text
-                          style={[
-                            styles.goalTypeBtnText,
-                            {
-                              color: active ? theme.accentInk : theme.text,
-                            },
-                          ]}
-                        >
-                          {opt.label}
-                        </Text>
-                      </TouchableOpacity>
-                    );
-                  })}
+                      [
+                        { id: 'none', label: 'Yok' },
+                        { id: 'timer', label: '⏱️ Sayaç' },
+                      ],
+                      [
+                        { id: 'reps', label: '🔁 Tekrar' },
+                        { id: 'amount', label: '📊 Miktar' },
+                      ],
+                    ] as { id: GoalType; label: string }[][]
+                  ).map((row, rowIdx) => (
+                    <View key={rowIdx} style={styles.goalTypeRow}>
+                      {row.map((opt) => {
+                        const active = goalType === opt.id;
+                        return (
+                          <TouchableOpacity
+                            key={opt.id}
+                            activeOpacity={0.8}
+                            onPress={() => {
+                              Haptics.selectionAsync().catch(() => {});
+                              setGoalType(opt.id);
+                            }}
+                            style={[
+                              styles.goalTypeBtn,
+                              {
+                                backgroundColor: active
+                                  ? theme.accent
+                                  : theme.isDark
+                                  ? 'rgba(255,255,255,0.06)'
+                                  : 'rgba(0,0,0,0.05)',
+                                borderColor: active
+                                  ? theme.accent
+                                  : theme.isDark
+                                  ? 'rgba(255,255,255,0.16)'
+                                  : 'rgba(0,0,0,0.12)',
+                              },
+                            ]}
+                          >
+                            <Text
+                              numberOfLines={1}
+                              style={[
+                                styles.goalTypeBtnText,
+                                {
+                                  color: active ? theme.accentInk : theme.text,
+                                },
+                              ]}
+                            >
+                              {opt.label}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
+                    </View>
+                  ))}
                 </View>
 
                 {goalType === 'timer' && (
@@ -2353,38 +4711,12 @@ function GunlukPlanScreen() {
                         <Text
                           style={[styles.subInputLabel, { color: theme.muted }]}
                         >
-                          Dakika
+                          Saat
                         </Text>
                         <TextInput
-                          value={timerMin}
+                          value={timerHour}
                           onChangeText={(v) =>
-                            setTimerMin(v.replace(/[^0-9]/g, ''))
-                          }
-                          keyboardType="number-pad"
-                          maxLength={3}
-                          placeholder="2"
-                          placeholderTextColor={theme.muted}
-                          style={[
-                            styles.smallInput,
-                            {
-                              color: theme.text,
-                              borderColor: theme.isDark
-                                ? 'rgba(255,255,255,0.18)'
-                                : 'rgba(0,0,0,0.15)',
-                            },
-                          ]}
-                        />
-                      </View>
-                      <View style={{ flex: 1 }}>
-                        <Text
-                          style={[styles.subInputLabel, { color: theme.muted }]}
-                        >
-                          Saniye
-                        </Text>
-                        <TextInput
-                          value={timerSec}
-                          onChangeText={(v) =>
-                            setTimerSec(v.replace(/[^0-9]/g, ''))
+                            setTimerHour(v.replace(/[^0-9]/g, ''))
                           }
                           keyboardType="number-pad"
                           maxLength={2}
@@ -2401,45 +4733,73 @@ function GunlukPlanScreen() {
                           ]}
                         />
                       </View>
+                      <View style={{ flex: 1 }}>
+                        <Text
+                          style={[styles.subInputLabel, { color: theme.muted }]}
+                        >
+                          Dakika
+                        </Text>
+                        <TextInput
+                          value={timerMin}
+                          onChangeText={(v) =>
+                            setTimerMin(v.replace(/[^0-9]/g, ''))
+                          }
+                          keyboardType="number-pad"
+                          maxLength={3}
+                          placeholder="0"
+                          placeholderTextColor={theme.muted}
+                          style={[
+                            styles.smallInput,
+                            {
+                              color: theme.text,
+                              borderColor: theme.isDark
+                                ? 'rgba(255,255,255,0.18)'
+                                : 'rgba(0,0,0,0.15)',
+                            },
+                          ]}
+                        />
+                      </View>
                     </View>
                     <View style={styles.presetChipsRow}>
-                      {[1, 2, 3, 5, 10, 15, 30].map((m) => (
-                        <TouchableOpacity
-                          key={m}
-                          onPress={() => {
-                            Haptics.selectionAsync().catch(() => {});
-                            setTimerMin(String(m));
-                            setTimerSec('0');
-                          }}
-                          style={[
-                            styles.presetChip,
-                            {
-                              backgroundColor:
-                                timerMin === String(m) &&
-                                (timerSec === '0' || timerSec === '')
+                      {TIMER_PRESETS.map((preset) => {
+                        const curH = parseInt(timerHour || '0', 10) || 0;
+                        const curM = parseInt(timerMin || '0', 10) || 0;
+                        const isPresetActive =
+                          curH === preset.h && curM === preset.m;
+                        return (
+                          <TouchableOpacity
+                            key={preset.label}
+                            onPress={() => {
+                              Haptics.selectionAsync().catch(() => {});
+                              setTimerHour(String(preset.h));
+                              setTimerMin(String(preset.m));
+                            }}
+                            style={[
+                              styles.presetChip,
+                              {
+                                backgroundColor: isPresetActive
                                   ? theme.accent
                                   : theme.isDark
                                   ? 'rgba(255,255,255,0.08)'
                                   : 'rgba(0,0,0,0.06)',
-                            },
-                          ]}
-                        >
-                          <Text
-                            style={[
-                              styles.presetChipText,
-                              {
-                                color:
-                                  timerMin === String(m) &&
-                                  (timerSec === '0' || timerSec === '')
-                                    ? theme.accentInk
-                                    : theme.text,
                               },
                             ]}
                           >
-                            {m} dk
-                          </Text>
-                        </TouchableOpacity>
-                      ))}
+                            <Text
+                              style={[
+                                styles.presetChipText,
+                                {
+                                  color: isPresetActive
+                                    ? theme.accentInk
+                                    : theme.text,
+                                },
+                              ]}
+                            >
+                              {preset.label}
+                            </Text>
+                          </TouchableOpacity>
+                        );
+                      })}
                     </View>
                   </View>
                 )}
@@ -2804,7 +5164,7 @@ function GunlukPlanScreen() {
                   </TouchableOpacity>
                 </View>
               </ScrollView>
-            </Pressable>
+            </SheetPressable>
           </Pressable>
         </KeyboardAvoidingView>
       </Modal>
@@ -2824,7 +5184,7 @@ function GunlukPlanScreen() {
             style={styles.modalBackdropInner}
             onPress={closeActionModal}
           >
-            <Pressable
+            <SheetPressable
               style={[
                 styles.editorCard,
                 {
@@ -3373,10 +5733,637 @@ function GunlukPlanScreen() {
                   )}
                 </>
               )}
-            </Pressable>
+            </SheetPressable>
           </Pressable>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* Görev Ekle / Düzenle Penceresi (Google Görevler Tarzı) */}
+      <Modal
+        visible={taskModalOpen}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (taskDatePickerOpen) setTaskDatePickerOpen(false);
+          else setTaskModalOpen(false);
+        }}
+      >
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          style={styles.modalBackdrop}
+        >
+          <Pressable
+            style={styles.modalBackdropInner}
+            onPress={() => {
+              if (taskDatePickerOpen) setTaskDatePickerOpen(false);
+              else setTaskModalOpen(false);
+            }}
+          >
+            <SheetPressable
+              style={[
+                styles.editorCard,
+                {
+                  backgroundColor: '#3D0000',
+                  borderColor: '#950101',
+                  borderWidth: 1.5,
+                  borderRadius: theme.radius,
+                  maxHeight: '90%',
+                },
+              ]}
+              onPress={(e) => e.stopPropagation()}
+            >
+              {taskDatePickerOpen ? (
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                  nestedScrollEnabled
+                  scrollEnabled={pickerOuterScrollEnabled}
+                >
+                  <View style={styles.taskModalTopRow}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        Haptics.selectionAsync().catch(() => {});
+                        setTaskDatePickerOpen(false);
+                      }}
+                      style={styles.backToHomeBtn}
+                    >
+                      <Text style={[styles.backToHomeArrow, { color: '#FF0000' }]}>
+                        ‹
+                      </Text>
+                      <Text
+                        style={[
+                          styles.editorTitle,
+                          { color: '#ffffff', marginBottom: 0, fontSize: 18 },
+                        ]}
+                      >
+                        Tarih ve Saat Seç
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  {/* Takvim (Tarih Seçimi) */}
+                  <View style={styles.datePickerBox}>
+                    <View style={styles.calendarHeaderRow}>
+                      <TouchableOpacity
+                        onPress={() => changePickerMonth(-1)}
+                        style={styles.calendarNavBtn}
+                        accessibilityLabel="Önceki ay"
+                      >
+                        <Text style={styles.calendarNavBtnText}>‹</Text>
+                      </TouchableOpacity>
+
+                      <Text style={styles.calendarMonthTitle}>
+                        {formatMonthTR(pickerViewYear, pickerViewMonth)}
+                      </Text>
+
+                      <TouchableOpacity
+                        onPress={() => changePickerMonth(1)}
+                        style={styles.calendarNavBtn}
+                        accessibilityLabel="Sonraki ay"
+                      >
+                        <Text style={styles.calendarNavBtnText}>›</Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    <View style={styles.calendarWeekdaysRow}>
+                      {TR_WEEKDAYS_SHORT.map((wd) => (
+                        <Text key={wd} style={styles.calendarWeekdayText}>
+                          {wd}
+                        </Text>
+                      ))}
+                    </View>
+
+                    {(() => {
+                      const pDim = daysInMonth(pickerViewYear, pickerViewMonth);
+                      const firstDayOffset =
+                        (new Date(pickerViewYear, pickerViewMonth, 1).getDay() +
+                          6) %
+                        7;
+                      const slots: (number | null)[] = [];
+                      for (let i = 0; i < firstDayOffset; i++) slots.push(null);
+                      for (let d = 1; d <= pDim; d++) slots.push(d);
+                      while (slots.length % 7 !== 0) slots.push(null);
+
+                      const weeks: (number | null)[][] = [];
+                      for (let i = 0; i < slots.length; i += 7) {
+                        weeks.push(slots.slice(i, i + 7));
+                      }
+
+                      return (
+                        <View style={styles.calendarGrid}>
+                          {weeks.map((week, wIdx) => (
+                            <View key={wIdx} style={styles.calendarWeekRow}>
+                              {week.map((dayNum, cIdx) => {
+                                if (dayNum === null) {
+                                  return (
+                                    <View
+                                      key={`empty-${wIdx}-${cIdx}`}
+                                      style={styles.calendarDayCell}
+                                    />
+                                  );
+                                }
+                                const isSel =
+                                  pickerSelectedDate.y === pickerViewYear &&
+                                  pickerSelectedDate.m === pickerViewMonth &&
+                                  pickerSelectedDate.d === dayNum;
+                                const isTod =
+                                  today.y === pickerViewYear &&
+                                  today.m === pickerViewMonth &&
+                                  today.d === dayNum;
+
+                                return (
+                                  <TouchableOpacity
+                                    key={dayNum}
+                                    activeOpacity={0.75}
+                                    onPress={() => {
+                                      Haptics.selectionAsync().catch(() => {});
+                                      setPickerSelectedDate({
+                                        y: pickerViewYear,
+                                        m: pickerViewMonth,
+                                        d: dayNum,
+                                      });
+                                    }}
+                                    style={[
+                                      styles.calendarDayCell,
+                                      isTod &&
+                                        !isSel && {
+                                          borderWidth: 1.5,
+                                          borderColor: '#FF0000',
+                                        },
+                                      isSel && {
+                                        backgroundColor: '#FF0000',
+                                      },
+                                    ]}
+                                  >
+                                    <Text
+                                      style={[
+                                        styles.calendarDayText,
+                                        isSel && {
+                                          color: '#ffffff',
+                                          fontWeight: '800',
+                                        },
+                                      ]}
+                                    >
+                                      {dayNum}
+                                    </Text>
+                                  </TouchableOpacity>
+                                );
+                              })}
+                            </View>
+                          ))}
+                        </View>
+                      );
+                    })()}
+                  </View>
+
+                  {/* Saat Seçimi */}
+                  <View style={styles.datePickerBox}>
+                    <View style={styles.timeHeaderRow}>
+                      <Text style={styles.timeSectionTitle}>🕒 Saat Seçimi</Text>
+                      <TouchableOpacity
+                        activeOpacity={0.8}
+                        onPress={() => {
+                          Haptics.selectionAsync().catch(() => {});
+                          setPickerHasTime((v) => !v);
+                        }}
+                        style={[
+                          styles.timeToggleBtn,
+                          {
+                            backgroundColor: pickerHasTime
+                              ? '#FF0000'
+                              : '#3D0000',
+                            borderColor: pickerHasTime ? '#FF0000' : '#950101',
+                          },
+                        ]}
+                      >
+                        <Text style={styles.timeToggleBtnText}>
+                          {pickerHasTime ? '✓ Saat Açık' : 'Saat Kapalı'}
+                        </Text>
+                      </TouchableOpacity>
+                    </View>
+
+                    {pickerHasTime && (
+                      <View style={styles.wheelPickerRow}>
+                        <TimeWheelColumn
+                          label="SAAT"
+                          items={HOURS_LIST}
+                          selectedValue={pickerHour}
+                          onValueChange={setPickerHour}
+                          onWheelTouchChange={(touching) =>
+                            setPickerOuterScrollEnabled(!touching)
+                          }
+                        />
+
+                        <Text style={styles.wheelColon}>:</Text>
+
+                        <TimeWheelColumn
+                          label="DAKİKA"
+                          items={MINUTES_LIST}
+                          selectedValue={pickerMinute}
+                          onValueChange={setPickerMinute}
+                          onWheelTouchChange={(touching) =>
+                            setPickerOuterScrollEnabled(!touching)
+                          }
+                        />
+                      </View>
+                    )}
+                  </View>
+
+                  {/* Seçilen Tarih & Saat Önizlemesi */}
+                  <View style={styles.datePreviewBanner}>
+                    <Text style={styles.datePreviewText}>
+                      🔔{' '}
+                      {formatTaskDueDate(
+                        pickerSelectedDate.y,
+                        pickerSelectedDate.m,
+                        pickerSelectedDate.d,
+                        pickerHasTime,
+                        pickerHour,
+                        pickerMinute
+                      )}{' '}
+                      (
+                      {
+                        TR_WEEKDAYS[
+                          new Date(
+                            pickerSelectedDate.y,
+                            pickerSelectedDate.m,
+                            pickerSelectedDate.d
+                          ).getDay()
+                        ]
+                      }
+                      )
+                    </Text>
+                  </View>
+
+                  <View style={styles.editorActions}>
+                    <TouchableOpacity
+                      onPress={() => {
+                        Haptics.selectionAsync().catch(() => {});
+                        setTaskDueDate('');
+                        setTaskDatePickerOpen(false);
+                      }}
+                      style={[
+                        styles.dangerBtn,
+                        { borderColor: '#FF0000', backgroundColor: '#000000' },
+                      ]}
+                    >
+                      <Text style={[styles.dangerBtnText, { color: '#FF0000' }]}>
+                        Temizle
+                      </Text>
+                    </TouchableOpacity>
+
+                    <View style={{ flex: 1 }} />
+
+                    <TouchableOpacity
+                      onPress={() => setTaskDatePickerOpen(false)}
+                      style={[
+                        styles.ghostBtn,
+                        {
+                          borderColor: '#950101',
+                          backgroundColor: '#000000',
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.ghostBtnText, { color: '#ffffff' }]}>
+                        Vazgeç
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={applyTaskDatePicker}
+                      style={[
+                        styles.primaryBtn,
+                        { backgroundColor: '#FF0000' },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.primaryBtnText,
+                          { color: '#ffffff' },
+                        ]}
+                      >
+                        ✓ Seç
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </ScrollView>
+              ) : (
+                <ScrollView
+                  showsVerticalScrollIndicator={false}
+                  keyboardShouldPersistTaps="handled"
+                >
+                  <View style={styles.taskModalTopRow}>
+                    <Text
+                      style={[
+                        styles.editorTitle,
+                        {
+                          color: '#ffffff',
+                          marginBottom: 0,
+                        },
+                      ]}
+                    >
+                      {editingTask ? 'Görevi düzenle' : 'Yeni görev'}
+                    </Text>
+
+                    <TouchableOpacity
+                      onPress={() => {
+                        Haptics.selectionAsync().catch(() => {});
+                        setTaskStarred((s) => !s);
+                      }}
+                      style={[
+                        styles.taskModalStarBtn,
+                        {
+                          backgroundColor: taskStarred ? '#950101' : '#000000',
+                          borderColor: taskStarred ? '#FF0000' : '#950101',
+                        },
+                      ]}
+                    >
+                      <Text
+                        style={{
+                          fontSize: 15,
+                          color: '#ffffff',
+                          fontWeight: '700',
+                        }}
+                      >
+                        {taskStarred ? '★ Önemli' : '☆ Yıldızla'}
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <Text style={[styles.inputLabel, { color: '#ffffff' }]}>
+                    Görev adı
+                  </Text>
+                  <TextInput
+                    value={taskTitle}
+                    onChangeText={setTaskTitle}
+                    maxLength={100}
+                    placeholder="Örn. Faturayı öde, Market alışverişi yap"
+                    placeholderTextColor="#e0a3a3"
+                    style={[
+                      styles.textInput,
+                      {
+                        color: '#ffffff',
+                        backgroundColor: '#000000',
+                        borderColor: '#950101',
+                      },
+                    ]}
+                  />
+
+                  <Text style={[styles.inputLabel, { color: '#ffffff' }]}>
+                    Ayrıntılar / Not{' '}
+                    <Text style={{ fontWeight: '400', color: '#e0a3a3' }}>
+                      (isteğe bağlı)
+                    </Text>
+                  </Text>
+                  <TextInput
+                    value={taskDetail}
+                    onChangeText={setTaskDetail}
+                    maxLength={160}
+                    placeholder="Ayrıntı ekle..."
+                    placeholderTextColor="#e0a3a3"
+                    style={[
+                      styles.textInput,
+                      {
+                        color: '#ffffff',
+                        backgroundColor: '#000000',
+                        borderColor: '#950101',
+                      },
+                    ]}
+                  />
+
+                  <Text style={[styles.inputLabel, { color: '#ffffff' }]}>
+                    Tarih / Zaman{' '}
+                    <Text style={{ fontWeight: '400', color: '#e0a3a3' }}>
+                      (isteğe bağlı)
+                    </Text>
+                  </Text>
+                  <View style={styles.dateTimeFieldRow}>
+                    <TouchableOpacity
+                      activeOpacity={0.8}
+                      onPress={openTaskDatePicker}
+                      style={[
+                        styles.dateTimeSelectBtn,
+                        {
+                          backgroundColor: '#000000',
+                          borderColor: taskDueDate ? '#FF0000' : '#950101',
+                        },
+                      ]}
+                    >
+                      <Text style={{ fontSize: 16 }}>📅</Text>
+                      <Text
+                        style={[
+                          styles.dateTimeSelectBtnText,
+                          {
+                            color: taskDueDate ? '#ffffff' : '#e0a3a3',
+                            fontWeight: taskDueDate ? '700' : '500',
+                          },
+                        ]}
+                      >
+                        {taskDueDate || 'Tarih ve saat seçmek için dokun...'}
+                      </Text>
+                      <View
+                        style={[
+                          styles.dateTimeActionBadge,
+                          { backgroundColor: '#950101' },
+                        ]}
+                      >
+                        <Text style={styles.dateTimeActionBadgeText}>
+                          {taskDueDate ? 'Değiştir' : '🕒 Seç'}
+                        </Text>
+                      </View>
+                    </TouchableOpacity>
+
+                    {!!taskDueDate && (
+                      <TouchableOpacity
+                        onPress={() => {
+                          Haptics.selectionAsync().catch(() => {});
+                          setTaskDueDate('');
+                        }}
+                        accessibilityLabel="Tarihi temizle"
+                        style={styles.dateTimeClearBtn}
+                      >
+                        <Text style={{ color: '#ffffff', fontWeight: '800' }}>
+                          ✕
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+
+                  {/* Alt Görevler */}
+                  <Text
+                    style={[
+                      styles.inputLabel,
+                      { color: '#ffffff', marginTop: 4 },
+                    ]}
+                  >
+                    Alt görevler{' '}
+                    <Text style={{ fontWeight: '400', color: '#e0a3a3' }}>
+                      ({taskSubtasks.length})
+                    </Text>
+                  </Text>
+
+                  {taskSubtasks.length > 0 && (
+                    <View style={styles.subtasksList}>
+                      {taskSubtasks.map((st) => (
+                        <View
+                          key={st.id}
+                          style={[
+                            styles.subtaskItem,
+                            {
+                              backgroundColor: '#000000',
+                              borderColor: '#950101',
+                            },
+                          ]}
+                        >
+                          <TouchableOpacity
+                            onPress={() => handleToggleTaskSubtaskModal(st.id)}
+                            style={[
+                              styles.subtaskCheck,
+                              {
+                                borderRadius: 11,
+                                borderColor: st.done ? '#FF0000' : '#950101',
+                                backgroundColor: st.done
+                                  ? '#FF0000'
+                                  : 'transparent',
+                              },
+                            ]}
+                          >
+                            {st.done && (
+                              <Text style={styles.subtaskCheckIcon}>✓</Text>
+                            )}
+                          </TouchableOpacity>
+                          <Text
+                            onPress={() => handleToggleTaskSubtaskModal(st.id)}
+                            style={[
+                              styles.subtaskTitle,
+                              {
+                                color: st.done ? '#e0a3a3' : '#ffffff',
+                                textDecorationLine: st.done
+                                  ? 'line-through'
+                                  : 'none',
+                              },
+                            ]}
+                          >
+                            {st.title}
+                          </Text>
+                          <TouchableOpacity
+                            onPress={() => handleRemoveTaskSubtaskModal(st.id)}
+                            style={styles.subtaskRemoveBtn}
+                          >
+                            <Text style={{ color: '#e0a3a3', fontSize: 14 }}>
+                              ✕
+                            </Text>
+                          </TouchableOpacity>
+                        </View>
+                      ))}
+                    </View>
+                  )}
+
+                  <View style={styles.subtaskAddRow}>
+                    <TextInput
+                      value={newTaskSubtaskTitle}
+                      onChangeText={setNewTaskSubtaskTitle}
+                      maxLength={80}
+                      placeholder="Alt görev ekle..."
+                      placeholderTextColor="#e0a3a3"
+                      onSubmitEditing={handleAddTaskSubtask}
+                      style={[
+                        styles.smallInput,
+                        {
+                          flex: 1,
+                          marginBottom: 0,
+                          color: '#ffffff',
+                          backgroundColor: '#000000',
+                          borderColor: '#950101',
+                        },
+                      ]}
+                    />
+                    <TouchableOpacity
+                      onPress={handleAddTaskSubtask}
+                      style={[
+                        styles.subtaskAddBtn,
+                        { backgroundColor: '#FF0000' },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.primaryBtnText,
+                          { color: '#ffffff' },
+                        ]}
+                      >
+                        ＋ Ekle
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+
+                  <View style={styles.editorActions}>
+                    {editingTask && (
+                      <TouchableOpacity
+                        onPress={handleDeleteTaskFromModal}
+                        style={[
+                          styles.dangerBtn,
+                          {
+                            borderColor: '#FF0000',
+                            backgroundColor: confirmTaskDelete
+                              ? '#FF0000'
+                              : '#000000',
+                          },
+                        ]}
+                      >
+                        <Text
+                          style={[
+                            styles.dangerBtnText,
+                            { color: confirmTaskDelete ? '#ffffff' : '#FF0000' },
+                          ]}
+                        >
+                          {confirmTaskDelete ? 'Emin misin? Sil' : 'Sil'}
+                        </Text>
+                      </TouchableOpacity>
+                    )}
+
+                    <View style={{ flex: 1 }} />
+
+                    <TouchableOpacity
+                      onPress={() => setTaskModalOpen(false)}
+                      style={[
+                        styles.ghostBtn,
+                        {
+                          borderColor: '#950101',
+                          backgroundColor: '#000000',
+                        },
+                      ]}
+                    >
+                      <Text style={[styles.ghostBtnText, { color: '#ffffff' }]}>
+                        Vazgeç
+                      </Text>
+                    </TouchableOpacity>
+
+                    <TouchableOpacity
+                      onPress={saveTaskModal}
+                      style={[
+                        styles.primaryBtn,
+                        { backgroundColor: '#FF0000' },
+                      ]}
+                    >
+                      <Text
+                        style={[
+                          styles.primaryBtnText,
+                          { color: '#ffffff' },
+                        ]}
+                      >
+                        Kaydet
+                      </Text>
+                    </TouchableOpacity>
+                  </View>
+                </ScrollView>
+              )}
+            </SheetPressable>
+          </Pressable>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* Sekme / bölüm değişiminde tema rengi yumuşak geçiş katmanı */}
+      <ThemeCrossfade color={theme.bg} />
     </SafeAreaView>
   );
 }
@@ -3417,6 +6404,207 @@ const styles = StyleSheet.create({
   appTitle: {
     fontSize: 16,
     fontWeight: '800',
+  },
+  topModeTabs: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  topModeTabBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderBottomWidth: 3,
+    borderBottomColor: 'transparent',
+  },
+  topModeTabText: {
+    fontSize: 15.5,
+  },
+  topModeBadge: {
+    minWidth: 20,
+    height: 20,
+    borderRadius: 10,
+    paddingHorizontal: 5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  topModeBadgeText: {
+    fontSize: 11.5,
+    fontWeight: '800',
+    fontVariant: ['tabular-nums'],
+  },
+  taskFilterTabs: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  taskFilterBtn: {
+    borderRadius: 999,
+    paddingVertical: 7,
+    paddingHorizontal: 13,
+    borderWidth: 1.8,
+  },
+  taskFilterBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  quickTaskBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 10,
+  },
+  quickTaskInput: {
+    flex: 1,
+    fontSize: 15.5,
+    paddingVertical: 4,
+  },
+  taskCard: {
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+  },
+  taskMainRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 12,
+  },
+  taskCircleCheck: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    borderWidth: 2.2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 1,
+  },
+  taskCircleTick: {
+    color: '#ffffff',
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  taskBodyPressable: {
+    flex: 1,
+    gap: 3,
+  },
+  taskItemTitle: {
+    fontSize: 16,
+    fontWeight: '700',
+    lineHeight: 21,
+  },
+  taskItemDetail: {
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  taskMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 4,
+  },
+  taskDateChip: {
+    paddingHorizontal: 9,
+    paddingVertical: 3,
+    borderRadius: 99,
+    borderWidth: 1,
+  },
+  taskDateChipText: {
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
+  taskStarBtn: {
+    paddingHorizontal: 4,
+    paddingVertical: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  taskStarIcon: {
+    fontSize: 21,
+    lineHeight: 24,
+  },
+  taskSubtasksContainer: {
+    marginTop: 10,
+    marginLeft: 36,
+    gap: 8,
+  },
+  taskSubtaskRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 9,
+  },
+  taskSubCircle: {
+    width: 19,
+    height: 19,
+    borderRadius: 10,
+    borderWidth: 1.8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  taskSubCircleTick: {
+    color: '#ffffff',
+    fontSize: 10.5,
+    fontWeight: '800',
+  },
+  taskSubtaskText: {
+    flex: 1,
+    fontSize: 13.5,
+    fontWeight: '500',
+  },
+  completedSectionCard: {
+    marginTop: 14,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+  },
+  completedHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  completedToggleBtn: {
+    paddingVertical: 4,
+    flex: 1,
+  },
+  completedHeaderTitle: {
+    fontSize: 14.5,
+    fontWeight: '800',
+  },
+  clearCompletedBtn: {
+    paddingVertical: 4,
+    paddingHorizontal: 8,
+  },
+  clearCompletedText: {
+    fontSize: 12.5,
+    fontWeight: '700',
+  },
+  completedList: {
+    marginTop: 6,
+  },
+  completedTaskRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+  },
+  taskDeleteIconBtn: {
+    padding: 6,
+  },
+  taskModalTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 14,
+    gap: 10,
+  },
+  taskModalStarBtn: {
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+    borderRadius: 99,
+    borderWidth: 1.5,
   },
   profileCircleBtn: {
     width: 36,
@@ -3643,6 +6831,15 @@ const styles = StyleSheet.create({
     height: '100%',
     borderRadius: 99,
   },
+  progressPct: {
+    minWidth: 38,
+    textAlign: 'right',
+    fontVariant: ['tabular-nums'],
+  },
+  heroLayer: {
+    // Kutlama konfetisi alttaki kartların üstünde görünsün
+    zIndex: 10,
+  },
   toolbar: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -3795,6 +6992,14 @@ const styles = StyleSheet.create({
   statText: {
     fontSize: 12,
   },
+  statWithIcon: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 3,
+  },
+  statIcon: {
+    fontSize: 12,
+  },
   statBold: {
     fontWeight: '700',
   },
@@ -3847,14 +7052,16 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   chainScroll: {
-    marginTop: 10,
+    // Dalga halkası animasyonu kırpılmasın diye dikey boşluk artırıldı; net yükseklik aynı kalır
+    marginTop: 2,
+    marginBottom: -8,
     alignSelf: 'center',
   },
   chainRow: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingVertical: 2,
+    paddingVertical: 10,
   },
   chainCell: {
     borderWidth: 2,
@@ -4016,25 +7223,27 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     fontVariant: ['tabular-nums'],
   },
+  goalTypeGrid: {
+    gap: 8,
+    marginBottom: 14,
+  },
   goalTypeRow: {
     flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 12,
+    gap: 8,
   },
   goalTypeBtn: {
     flex: 1,
-    minWidth: 74,
-    paddingVertical: 9,
-    paddingHorizontal: 8,
+    height: 42,
+    paddingHorizontal: 10,
     borderRadius: 10,
     borderWidth: 1.5,
     alignItems: 'center',
     justifyContent: 'center',
   },
   goalTypeBtnText: {
-    fontSize: 12.5,
+    fontSize: 13.5,
     fontWeight: '700',
+    textAlign: 'center',
   },
   goalConfigBox: {
     padding: 12,
@@ -4172,7 +7381,6 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    flexWrap: 'wrap',
     gap: 8,
     marginTop: 16,
     width: '100%',
@@ -4218,5 +7426,216 @@ const styles = StyleSheet.create({
   quickStepBtnText: {
     fontSize: 13.5,
     fontWeight: '700',
+  },
+  dateTimeFieldRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    marginBottom: 14,
+  },
+  dateTimeSelectBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 14,
+    borderWidth: 1.8,
+    borderRadius: 12,
+  },
+  dateTimeSelectBtnText: {
+    flex: 1,
+    fontSize: 15,
+  },
+  dateTimeActionBadge: {
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 99,
+  },
+  dateTimeActionBadgeText: {
+    color: '#ffffff',
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
+  dateTimeClearBtn: {
+    width: 40,
+    height: 44,
+    borderRadius: 12,
+    backgroundColor: '#950101',
+    borderWidth: 1.5,
+    borderColor: '#FF0000',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  datePickerBox: {
+    backgroundColor: '#000000',
+    borderWidth: 1.5,
+    borderColor: '#950101',
+    borderRadius: 14,
+    padding: 12,
+    marginBottom: 12,
+  },
+  calendarHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  calendarNavBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#3D0000',
+    borderWidth: 1,
+    borderColor: '#950101',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calendarNavBtnText: {
+    color: '#ffffff',
+    fontSize: 20,
+    lineHeight: 22,
+    fontWeight: '700',
+  },
+  calendarMonthTitle: {
+    color: '#ffffff',
+    fontSize: 16,
+    fontWeight: '800',
+  },
+  calendarWeekdaysRow: {
+    flexDirection: 'row',
+    marginBottom: 6,
+  },
+  calendarWeekdayText: {
+    flex: 1,
+    textAlign: 'center',
+    color: '#e0a3a3',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  calendarGrid: {
+    gap: 4,
+  },
+  calendarWeekRow: {
+    flexDirection: 'row',
+    gap: 4,
+  },
+  calendarDayCell: {
+    flex: 1,
+    height: 36,
+    borderRadius: 9,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  calendarDayText: {
+    color: '#ffffff',
+    fontSize: 13.5,
+    fontWeight: '600',
+    fontVariant: ['tabular-nums'],
+  },
+  timeHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  timeSectionTitle: {
+    color: '#ffffff',
+    fontSize: 14.5,
+    fontWeight: '800',
+  },
+  timeToggleBtn: {
+    paddingVertical: 5,
+    paddingHorizontal: 11,
+    borderRadius: 99,
+    borderWidth: 1,
+  },
+  timeToggleBtnText: {
+    color: '#ffffff',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  timeStepperLabel: {
+    color: '#e0a3a3',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.6,
+  },
+  wheelPickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 14,
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  wheelCol: {
+    alignItems: 'center',
+    gap: 6,
+  },
+  wheelBox: {
+    width: 96,
+    height: WHEEL_HEIGHT,
+    borderRadius: 14,
+    backgroundColor: '#1a0000',
+    borderWidth: 1.5,
+    borderColor: '#950101',
+    overflow: 'hidden',
+    position: 'relative',
+  },
+  wheelHighlightBar: {
+    position: 'absolute',
+    top: WHEEL_ITEM_HEIGHT,
+    left: 6,
+    right: 6,
+    height: WHEEL_ITEM_HEIGHT,
+    borderRadius: 10,
+    backgroundColor: '#3D0000',
+    borderWidth: 1.5,
+    borderColor: '#FF0000',
+  },
+  wheelScroll: {
+    width: '100%',
+    height: WHEEL_HEIGHT,
+  },
+  wheelItem: {
+    height: WHEEL_ITEM_HEIGHT,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  wheelItemText: {
+    fontVariant: ['tabular-nums'],
+  },
+  wheelItemTextSelected: {
+    color: '#ffffff',
+    fontSize: 22,
+    fontWeight: '800',
+  },
+  wheelItemTextDim: {
+    color: 'rgba(224, 163, 163, 0.45)',
+    fontSize: 16,
+    fontWeight: '600',
+  },
+  wheelColon: {
+    color: '#FF0000',
+    fontSize: 28,
+    fontWeight: '800',
+    marginTop: 18,
+  },
+  datePreviewBanner: {
+    backgroundColor: '#950101',
+    borderWidth: 1,
+    borderColor: '#FF0000',
+    borderRadius: 12,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    marginBottom: 4,
+    alignItems: 'center',
+  },
+  datePreviewText: {
+    color: '#ffffff',
+    fontSize: 13.5,
+    fontWeight: '700',
+    textAlign: 'center',
   },
 });

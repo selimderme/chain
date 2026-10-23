@@ -90,6 +90,43 @@ body[data-tab="kotu-aliskanliklar"] {
   --pattern-size: auto;
   --anim: wobble;
 }
+body[data-section="gorevler"] {
+  color-scheme: dark;
+  --bg: #000000;
+  --surface: #3D0000;
+  --text: #ffffff;
+  --muted: #e0a3a3;
+  --accent: #FF0000;
+  --accent-ink: #ffffff;
+  --accent-soft: #950101;
+  --font: "Google Sans", "Product Sans", "Roboto", system-ui, -apple-system, sans-serif;
+  --head-font: "Google Sans", "Product Sans", "Roboto", system-ui, -apple-system, sans-serif;
+  --head-weight: 800; --head-transform: none; --head-style: normal; --head-spacing: 0;
+  --radius: 18px; --cell-radius: 8px;
+  --card-border: 1.5px solid #950101;
+  --shadow: inset 6px 0 0 #FF0000, 0 10px 26px -10px rgba(255, 0, 0, .35);
+  --pattern: radial-gradient(circle at 15% 10%, rgba(149, 1, 1, .28) 0, transparent 45%), radial-gradient(circle at 85% 85%, rgba(61, 0, 0, .5) 0, transparent 50%);
+  --pattern-size: auto;
+  --anim: pulse;
+}
+body[data-section="gorevler"] .hero {
+  background: #950101;
+  border: 1.5px solid #FF0000;
+}
+body[data-section="gorevler"] .hero .bar {
+  background: #3D0000;
+}
+body[data-section="gorevler"] .hero .bar > span {
+  background: #FF0000;
+}
+body[data-section="gorevler"] .pill {
+  background: #3D0000;
+  border-color: #950101;
+}
+body[data-section="gorevler"] .goal-chip {
+  background: #950101;
+  border-color: #FF0000;
+}
 
 /* ───────── Temel ───────── */
 *, *::before, *::after { box-sizing: border-box; }
@@ -127,6 +164,86 @@ button { cursor: pointer; }
   font: var(--head-weight) .95rem var(--head-font);
   text-transform: var(--head-transform); letter-spacing: var(--head-spacing);
   color: var(--muted);
+}
+.top-mode-tabs {
+  display: flex; align-items: center; gap: 6px;
+}
+.top-mode-btn {
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px; border: 0;
+  border-bottom: 3px solid transparent;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  font: 600 .95rem var(--head-font);
+  transition: color .2s, background .2s, border-color .2s;
+}
+.top-mode-btn.active {
+  color: var(--text);
+  font-weight: 800;
+  border-bottom-color: var(--accent);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+}
+.top-mode-badge {
+  min-width: 20px; height: 20px; padding: 0 5px;
+  border-radius: 99px;
+  background: color-mix(in srgb, var(--text) 14%, transparent);
+  color: var(--text);
+  font-size: .72rem; font-weight: 800;
+  display: inline-grid; place-items: center;
+  font-variant-numeric: tabular-nums;
+}
+.top-mode-btn.active .top-mode-badge {
+  background: var(--accent); color: var(--accent-ink);
+}
+.task-quick-bar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 10px 14px; margin-bottom: 10px;
+}
+.task-quick-bar input {
+  flex: 1; border: 0; background: transparent;
+  font-size: .96rem; padding: 4px 0; outline: none;
+}
+.task-row {
+  display: flex; align-items: flex-start; gap: 12px;
+}
+.task-circle {
+  width: 24px; height: 24px; border-radius: 50%;
+  border: 2.2px solid var(--accent);
+  background: transparent; flex: none;
+  display: grid; place-items: center;
+  padding: 0; margin-top: 1px;
+  color: #fff; font-size: .8rem; font-weight: 800;
+}
+.task-circle.done {
+  border-color: var(--green); background: var(--green);
+}
+.task-body {
+  flex: 1; min-width: 0; cursor: pointer;
+}
+.task-body h4 { margin: 0; font-size: 1rem; }
+.task-body .detail { margin-top: 2px; }
+.task-star-btn {
+  background: transparent; border: 0; font-size: 1.3rem;
+  color: var(--muted); padding: 2px 6px; line-height: 1;
+}
+.task-star-btn.starred { color: #f59e0b; }
+.task-subtasks {
+  margin-top: 8px; margin-left: 36px; display: grid; gap: 6px;
+}
+.task-sub-row {
+  display: flex; align-items: center; gap: 8px;
+  background: transparent; border: 0; padding: 2px 0;
+  text-align: left; font-size: .86rem;
+}
+.task-sub-circle {
+  width: 18px; height: 18px; border-radius: 50%;
+  border: 1.8px solid var(--muted);
+  display: inline-grid; place-items: center;
+  font-size: .68rem; color: #fff; flex: none;
+}
+.task-sub-circle.done {
+  border-color: var(--green); background: var(--green);
 }
 .profile-circle-btn {
   width: 36px; height: 36px; border-radius: 50%;
@@ -437,12 +554,13 @@ button { cursor: pointer; }
 
 .field-block { margin-bottom: 12px; }
 .field-label { display: block; font-weight: 700; font-size: .88rem; margin-bottom: 6px; }
-.goal-type-row { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.goal-type-row { display: grid; grid-template-columns: repeat(2, 1fr); gap: 8px; margin-bottom: 12px; }
 .goal-type-btn {
-  flex: 1; min-width: 72px; padding: 8px 10px; border-radius: 10px;
+  padding: 10px; border-radius: 10px;
   border: 1.5px solid color-mix(in srgb, var(--text) 16%, transparent);
   background: color-mix(in srgb, var(--text) 5%, transparent);
-  font-weight: 700; font-size: .8rem;
+  font-weight: 700; font-size: .84rem;
+  display: flex; align-items: center; justify-content: center;
 }
 .goal-type-btn.active { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
 .goal-config-box {
@@ -481,6 +599,113 @@ button { cursor: pointer; }
 .action-bar > span { display: block; height: 100%; background: var(--accent); border-radius: inherit; transition: width .25s; }
 .amount-big { font-size: 2.3rem; font-weight: 800; text-align: center; margin: 6px 0 10px; font-variant-numeric: tabular-nums; }
 .amount-big small { font-size: 1rem; color: var(--muted); font-weight: 600; }
+
+/* ───────── Görev Tarih & Saat Seçici ───────── */
+.task-editor-dialog {
+  background: #3D0000;
+  color: #ffffff;
+  border: 1.5px solid #950101;
+}
+.task-editor-dialog input[type="text"],
+.task-editor-dialog input:not([type]) {
+  background: #000000;
+  border-color: #950101;
+  color: #ffffff;
+}
+.task-editor-dialog .subtask-item {
+  background: #000000;
+  border-color: #950101;
+}
+.dt-field-row {
+  display: flex; align-items: center; gap: 8px; margin-top: 6px;
+}
+.dt-select-btn {
+  flex: 1; display: flex; align-items: center; gap: 10px;
+  padding: 12px 14px; border-radius: 12px;
+  background: #000000; border: 2px solid #950101;
+  color: #ffffff; text-align: left;
+}
+.dt-select-btn.has-value { border-color: #FF0000; }
+.dt-select-text { flex: 1; font-size: .92rem; font-weight: 600; }
+.dt-select-text.muted { color: #e0a3a3; font-weight: 400; }
+.dt-action-badge {
+  padding: 3px 9px; border-radius: 99px;
+  background: #950101; color: #ffffff;
+  font-size: .74rem; font-weight: 700;
+}
+.dt-clear-btn {
+  width: 40px; height: 44px; border-radius: 12px;
+  background: #950101; border: 1.5px solid #FF0000;
+  color: #ffffff; font-weight: 800;
+}
+.dt-box {
+  background: #000000; border: 1.5px solid #950101;
+  border-radius: 14px; padding: 12px; margin-bottom: 12px;
+}
+.dt-cal-head {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;
+}
+.dt-cal-head b { font-size: .96rem; text-transform: capitalize; }
+.dt-cal-nav {
+  width: 32px; height: 32px; border-radius: 50%;
+  background: #3D0000; border: 1px solid #950101; color: #ffffff;
+  font-size: 1.1rem; font-weight: 700;
+}
+.dt-weekdays {
+  display: grid; grid-template-columns: repeat(7, 1fr);
+  text-align: center; font-size: .75rem; color: #e0a3a3; font-weight: 700; margin-bottom: 4px;
+}
+.dt-days-grid {
+  display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px;
+}
+.dt-day-btn {
+  height: 34px; border-radius: 8px; border: 1.5px solid transparent;
+  background: transparent; color: #ffffff; font-size: .82rem; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+.dt-day-btn.today { border-color: #FF0000; }
+.dt-day-btn.selected { background: #FF0000; border-color: #FF0000; font-weight: 800; }
+.dt-time-head {
+  display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px;
+}
+.dt-wheel-row {
+  display: flex; align-items: center; justify-content: center; gap: 14px; margin: 4px 0 2px;
+}
+.dt-wheel-col { display: flex; flex-direction: column; align-items: center; gap: 6px; }
+.dt-wheel-col small { font-size: .7rem; color: #e0a3a3; font-weight: 700; letter-spacing: .04em; }
+.dt-wheel-box {
+  position: relative; width: 96px; height: 120px; border-radius: 14px;
+  background: #1a0000; border: 1.5px solid #950101; overflow: hidden;
+}
+.dt-wheel-highlight {
+  position: absolute; top: 40px; left: 6px; right: 6px; height: 40px;
+  border-radius: 10px; background: #3D0000; border: 1.5px solid #FF0000;
+  pointer-events: none; z-index: 1;
+}
+.dt-wheel-scroll {
+  position: relative; z-index: 2; width: 100%; height: 120px;
+  overflow-y: auto; scroll-snap-type: y mandatory;
+  padding: 40px 0; scrollbar-width: none; -ms-overflow-style: none;
+}
+.dt-wheel-scroll::-webkit-scrollbar { display: none; }
+.dt-wheel-item {
+  display: flex; align-items: center; justify-content: center;
+  width: 100%; height: 40px; border: 0; background: transparent;
+  color: rgba(224, 163, 163, 0.45); font-size: 1rem; font-weight: 600;
+  font-variant-numeric: tabular-nums; scroll-snap-align: center;
+  transition: color .15s, font-size .15s;
+}
+.dt-wheel-item.active {
+  color: #ffffff; font-size: 1.35rem; font-weight: 800;
+}
+.dt-wheel-colon {
+  font-size: 1.7rem; color: #FF0000; font-weight: 800; margin-top: 18px;
+}
+.dt-preview-banner {
+  background: #950101; border: 1px solid #FF0000; border-radius: 12px;
+  padding: 9px 12px; margin-bottom: 10px; text-align: center;
+  font-size: .84rem; font-weight: 700; color: #ffffff;
+}
 
 /* ───────── Alt kısım ───────── */
 .foot { max-width: min(96vw, 1560px); margin: 0 auto; padding: 8px 14px 28px; color: var(--muted); font-size: .8rem; text-align: center; }
