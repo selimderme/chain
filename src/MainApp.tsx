@@ -72,9 +72,12 @@ import {
   FadeSlideIn,
   FloatingEmoji,
   MarkPop,
+  MicroIcon,
+  MicroIconName,
   PopOnChange,
   PressableScale,
   SheetPressable,
+  SoftGradientOverlay,
   StreakIcon,
   ThemeCrossfade,
   withAlpha,
@@ -382,7 +385,7 @@ function HabitWeekScroll({
   scrollKey,
   children,
 }: HabitWeekScrollProps) {
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -431,7 +434,7 @@ function TimeWheelColumn({
   onValueChange,
   onWheelTouchChange,
 }: TimeWheelColumnProps) {
-  const scrollRef = useRef<ScrollView>(null);
+  const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const isUserScrolling = useRef(false);
   const lastValRef = useRef(selectedValue);
 
@@ -1951,14 +1954,15 @@ function GunlukPlanScreen() {
   const isCurrentMonth =
     viewMonth.y === today.y && viewMonth.m === today.m;
 
-  // Kart içinde tam 7 gün (1 hafta) görünecek şekilde hücre boyutu hesabı
-  const leftBorderW = theme.leftAccentBar ? 6 : theme.cardBorderWidth;
+  // Kart içinde tam 7 gün (1 hafta) görünecek şekilde aktivite çemberi boyutu hesabı
+  // mainContent yatay padding: 16*2 = 32, card yatay padding: 18*2 = 36
+  const leftBorderW = theme.leftAccentBar ? 4 : theme.cardBorderWidth;
   const rightBorderW = theme.cardBorderWidth;
   const cardInnerWidth = Math.max(
-    230,
-    windowWidth - 28 - 24 - leftBorderW - rightBorderW
+    224,
+    windowWidth - 32 - 36 - leftBorderW - rightBorderW
   );
-  const cellGap = 6;
+  const cellGap = 8;
   const cellSize = Math.floor((cardInnerWidth - cellGap * 6) / 7);
   const rowViewportWidth = cellSize * 7 + cellGap * 6;
   const cellStep = cellSize + cellGap;
@@ -2122,16 +2126,24 @@ function GunlukPlanScreen() {
     >
       <StatusBar style={theme.isDark ? 'light' : 'dark'} />
 
-      {/* Üst Başlık (Günlük Rutin | Görevler) & Profil Dairesi */}
+      {/* Üst Başlık (Buzlu Cam / Glassmorphism Segmented Bar & Minimal Kontroller) */}
       <View
         style={[
           styles.topbar,
           {
-            backgroundColor: theme.bg,
+            backgroundColor:
+              theme.surfaceGlass ||
+              withAlpha(theme.surface, theme.isDark ? 0.78 : 0.85),
             borderBottomColor: theme.isDark
-              ? 'rgba(255,255,255,0.1)'
-              : 'rgba(0,0,0,0.08)',
+              ? 'rgba(255,255,255,0.06)'
+              : 'rgba(0,0,0,0.04)',
           },
+          Platform.OS === 'web'
+            ? ({
+                backdropFilter: 'blur(20px)',
+                WebkitBackdropFilter: 'blur(20px)',
+              } as any)
+            : null,
         ]}
       >
         <View style={styles.topbarLeft}>
@@ -2141,29 +2153,49 @@ function GunlukPlanScreen() {
                 Haptics.selectionAsync().catch(() => {});
                 setProfileOpen(false);
               }}
-              style={styles.backToHomeBtn}
+              style={[
+                styles.backToHomeBtn,
+                {
+                  backgroundColor: theme.isDark
+                    ? 'rgba(255,255,255,0.06)'
+                    : 'rgba(0,0,0,0.04)',
+                },
+              ]}
               activeOpacity={0.75}
             >
               <Text style={[styles.backToHomeArrow, { color: theme.accent }]}>
                 ‹
               </Text>
               <Text style={[styles.appTitle, { color: theme.text }]}>
-                Profil
+                Profil ve Ayarlar
               </Text>
             </TouchableOpacity>
           ) : (
-            <View style={styles.topModeTabs}>
+            <View
+              style={[
+                styles.topModeTabs,
+                {
+                  backgroundColor: theme.isDark
+                    ? 'rgba(255,255,255,0.05)'
+                    : 'rgba(0,0,0,0.04)',
+                  borderColor: theme.isDark
+                    ? 'rgba(255,255,255,0.07)'
+                    : 'rgba(0,0,0,0.05)',
+                },
+              ]}
+            >
               <TouchableOpacity
-                activeOpacity={0.8}
+                activeOpacity={0.85}
                 onPress={() => handleSelectSection('rutin')}
                 style={[
                   styles.topModeTabBtn,
-                  activeSection === 'rutin' && {
-                    borderBottomColor: theme.accent,
-                    backgroundColor: theme.isDark
-                      ? 'rgba(255,255,255,0.08)'
-                      : 'rgba(0,0,0,0.05)',
-                  },
+                  activeSection === 'rutin' && [
+                    styles.topModeTabBtnActive,
+                    {
+                      backgroundColor: theme.surface,
+                      shadowColor: theme.isDark ? '#000' : theme.accent,
+                    },
+                  ],
                 ]}
               >
                 <Text
@@ -2171,7 +2203,7 @@ function GunlukPlanScreen() {
                     styles.topModeTabText,
                     {
                       color: activeSection === 'rutin' ? theme.text : theme.muted,
-                      fontWeight: activeSection === 'rutin' ? '800' : '600',
+                      fontWeight: activeSection === 'rutin' ? '700' : '600',
                     },
                   ]}
                 >
@@ -2180,16 +2212,17 @@ function GunlukPlanScreen() {
               </TouchableOpacity>
 
               <TouchableOpacity
-                activeOpacity={0.8}
+                activeOpacity={0.85}
                 onPress={() => handleSelectSection('gorevler')}
                 style={[
                   styles.topModeTabBtn,
-                  activeSection === 'gorevler' && {
-                    borderBottomColor: theme.accent,
-                    backgroundColor: theme.isDark
-                      ? 'rgba(255,255,255,0.08)'
-                      : 'rgba(0,0,0,0.05)',
-                  },
+                  activeSection === 'gorevler' && [
+                    styles.topModeTabBtnActive,
+                    {
+                      backgroundColor: theme.surface,
+                      shadowColor: '#000',
+                    },
+                  ],
                 ]}
               >
                 <Text
@@ -2198,7 +2231,7 @@ function GunlukPlanScreen() {
                     {
                       color:
                         activeSection === 'gorevler' ? theme.text : theme.muted,
-                      fontWeight: activeSection === 'gorevler' ? '800' : '600',
+                      fontWeight: activeSection === 'gorevler' ? '700' : '600',
                     },
                   ]}
                 >
@@ -2212,9 +2245,7 @@ function GunlukPlanScreen() {
                         backgroundColor:
                           activeSection === 'gorevler'
                             ? theme.accent
-                            : theme.isDark
-                            ? 'rgba(255,255,255,0.14)'
-                            : 'rgba(0,0,0,0.1)',
+                            : withAlpha(theme.accent, 0.16),
                       },
                     ]}
                   >
@@ -2225,7 +2256,7 @@ function GunlukPlanScreen() {
                           color:
                             activeSection === 'gorevler'
                               ? theme.accentInk
-                              : theme.text,
+                              : theme.accent,
                         },
                       ]}
                     >
@@ -2238,37 +2269,47 @@ function GunlukPlanScreen() {
           )}
         </View>
 
-        <TouchableOpacity
-          onPress={handleToggleProfile}
-          activeOpacity={0.8}
-          accessibilityLabel="Profil sayfasını aç"
-          style={[
-            styles.profileCircleBtn,
-            {
-              backgroundColor: profileOpen
-                ? theme.accent
-                : theme.isDark
-                ? 'rgba(255,255,255,0.1)'
-                : 'rgba(0,0,0,0.07)',
-              borderColor: theme.accent,
-            },
-          ]}
-        >
-          {userInitials ? (
-            <Text
-              style={[
-                styles.profileCircleInitials,
-                {
-                  color: profileOpen ? theme.accentInk : theme.text,
-                },
-              ]}
-            >
-              {userInitials}
-            </Text>
-          ) : (
-            <Text style={styles.profileCircleEmoji}>👤</Text>
-          )}
-        </TouchableOpacity>
+        <View style={styles.topbarRightActions}>
+          <TouchableOpacity
+            onPress={handleToggleProfile}
+            activeOpacity={0.8}
+            accessibilityLabel="Profil ve ayarları aç"
+            style={[
+              styles.profileCircleBtn,
+              {
+                backgroundColor: profileOpen
+                  ? theme.accent
+                  : theme.isDark
+                  ? 'rgba(255,255,255,0.08)'
+                  : 'rgba(255,255,255,0.9)',
+                borderColor: profileOpen
+                  ? theme.accent
+                  : theme.isDark
+                  ? 'rgba(255,255,255,0.14)'
+                  : 'rgba(0,0,0,0.08)',
+              },
+            ]}
+          >
+            {userInitials ? (
+              <Text
+                style={[
+                  styles.profileCircleInitials,
+                  {
+                    color: profileOpen ? theme.accentInk : theme.text,
+                  },
+                ]}
+              >
+                {userInitials}
+              </Text>
+            ) : (
+              <MicroIcon
+                name="user"
+                size={15}
+                color={profileOpen ? theme.accentInk : theme.text}
+              />
+            )}
+          </TouchableOpacity>
+        </View>
       </View>
 
       {profileOpen ? (
@@ -2793,117 +2834,6 @@ function GunlukPlanScreen() {
               )}
             </View>
 
-            {/* Ad Soyad Girme ve Kaydetme Kartı */}
-            <View
-              style={[
-                styles.card,
-                styles.profileSectionCard,
-                {
-                  backgroundColor: theme.surface,
-                  borderRadius: theme.radius,
-                  borderColor: theme.cardBorderColor,
-                  borderWidth: theme.cardBorderWidth,
-                },
-              ]}
-            >
-              <Text
-                style={[
-                  styles.profileSectionTitle,
-                  {
-                    color: theme.text,
-                    fontStyle: theme.headItalic ? 'italic' : 'normal',
-                  },
-                ]}
-              >
-                👤 Kişisel Bilgiler
-              </Text>
-
-              <Text style={[styles.inputLabel, { color: theme.text }]}>Ad</Text>
-              <TextInput
-                value={profileFirstName}
-                onChangeText={setProfileFirstName}
-                maxLength={40}
-                placeholder="Adınızı girin"
-                placeholderTextColor={theme.muted}
-                style={[
-                  styles.textInput,
-                  {
-                    color: theme.text,
-                    backgroundColor: theme.isDark
-                      ? 'rgba(255,255,255,0.06)'
-                      : 'rgba(0,0,0,0.04)',
-                    borderColor: theme.isDark
-                      ? 'rgba(255,255,255,0.18)'
-                      : 'rgba(0,0,0,0.15)',
-                  },
-                ]}
-              />
-
-              <Text style={[styles.inputLabel, { color: theme.text }]}>
-                Soyad
-              </Text>
-              <TextInput
-                value={profileLastName}
-                onChangeText={setProfileLastName}
-                maxLength={40}
-                placeholder="Soyadınızı girin"
-                placeholderTextColor={theme.muted}
-                onSubmitEditing={handleSaveProfile}
-                style={[
-                  styles.textInput,
-                  {
-                    color: theme.text,
-                    backgroundColor: theme.isDark
-                      ? 'rgba(255,255,255,0.06)'
-                      : 'rgba(0,0,0,0.04)',
-                    borderColor: theme.isDark
-                      ? 'rgba(255,255,255,0.18)'
-                      : 'rgba(0,0,0,0.15)',
-                  },
-                ]}
-              />
-
-              <TouchableOpacity
-                onPress={handleSaveProfile}
-                activeOpacity={0.82}
-                style={[
-                  styles.primaryBtn,
-                  styles.profileFullBtn,
-                  { backgroundColor: theme.accent },
-                ]}
-              >
-                <Text
-                  style={[
-                    styles.primaryBtnText,
-                    { color: theme.accentInk, fontSize: 15 },
-                  ]}
-                >
-                  ✓ Bilgileri Kaydet
-                </Text>
-              </TouchableOpacity>
-
-              {profileSavedBanner && (
-                <View
-                  style={[
-                    styles.profileSavedToast,
-                    {
-                      backgroundColor: 'rgba(34, 197, 94, 0.15)',
-                      borderColor: MARK_COLORS.green,
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.profileSavedToastText,
-                      { color: MARK_COLORS.green },
-                    ]}
-                  >
-                    ✓ Ad ve soyad bilgileriniz başarıyla kaydedildi.
-                  </Text>
-                </View>
-              )}
-            </View>
-
             {/* Yedekle / Yedekten Yükle Bilgileri ve İşlemleri Kartı */}
             <View
               style={[
@@ -3069,15 +2999,26 @@ function GunlukPlanScreen() {
               style={[
                 styles.hero,
                 {
-                  backgroundColor: '#950101',
-                  borderColor: '#FF0000',
-                  borderWidth: 1.5,
+                  backgroundColor: theme.accent,
                   borderRadius: theme.radius,
+                  shadowColor: theme.accent,
                 },
               ]}
             >
+              <SoftGradientOverlay
+                borderRadius={theme.radius}
+                startColor="rgba(255,255,255,0.22)"
+                endColor={theme.accentGradientEnd || 'rgba(0,0,0,0.2)'}
+              />
               <View style={styles.heroTop}>
-                <Text style={styles.heroEmoji}>✅</Text>
+                <View
+                  style={[
+                    styles.heroEmojiBadge,
+                    { backgroundColor: 'rgba(255,255,255,0.16)' },
+                  ]}
+                >
+                  <Text style={styles.heroEmoji}>✅</Text>
+                </View>
                 <View style={styles.heroTextWrap}>
                   <Text
                     style={[
@@ -3104,7 +3045,7 @@ function GunlukPlanScreen() {
                   style={[
                     styles.progressBarBg,
                     {
-                      backgroundColor: '#3D0000',
+                      backgroundColor: 'rgba(0,0,0,0.24)',
                     },
                   ]}
                 >
@@ -3119,7 +3060,7 @@ function GunlukPlanScreen() {
                               )
                             : 0
                         }%`,
-                        backgroundColor: '#FF0000',
+                        backgroundColor: theme.accentInk,
                       },
                     ]}
                   />
@@ -3146,8 +3087,11 @@ function GunlukPlanScreen() {
                     styles.taskFilterBtn,
                     {
                       backgroundColor:
-                        taskFilter === 'all' ? '#FF0000' : '#3D0000',
-                      borderColor: taskFilter === 'all' ? '#FF0000' : '#950101',
+                        taskFilter === 'all' ? theme.accent : theme.surface,
+                      borderColor:
+                        taskFilter === 'all'
+                          ? theme.accent
+                          : theme.cardBorderColor,
                     },
                   ]}
                 >
@@ -3174,9 +3118,11 @@ function GunlukPlanScreen() {
                     styles.taskFilterBtn,
                     {
                       backgroundColor:
-                        taskFilter === 'starred' ? '#FF0000' : '#3D0000',
+                        taskFilter === 'starred' ? theme.accent : theme.surface,
                       borderColor:
-                        taskFilter === 'starred' ? '#FF0000' : '#950101',
+                        taskFilter === 'starred'
+                          ? theme.accent
+                          : theme.cardBorderColor,
                     },
                   ]}
                 >
@@ -3210,22 +3156,27 @@ function GunlukPlanScreen() {
                           ? { backgroundColor: theme.accent }
                           : {
                               backgroundColor: theme.surface,
-                              borderColor: theme.accent,
+                              borderColor: theme.cardBorderColor,
                             },
                       ]}
                     >
-                      <Text
-                        style={[
-                          styles.pillBtnText,
-                          {
-                            color: taskReorderMode
-                              ? theme.accentInk
-                              : theme.text,
-                          },
-                        ]}
-                      >
-                        {taskReorderMode ? '✓ Bitti' : '⇅ Sırala'}
-                      </Text>
+                      <View style={styles.btnContentRow}>
+                        {!taskReorderMode && (
+                          <MicroIcon name="sort" size={12} color={theme.muted} />
+                        )}
+                        <Text
+                          style={[
+                            styles.pillBtnText,
+                            {
+                              color: taskReorderMode
+                                ? theme.accentInk
+                                : theme.text,
+                            },
+                          ]}
+                        >
+                          {taskReorderMode ? '✓ Bitti' : 'Sırala'}
+                        </Text>
+                      </View>
                     </TouchableOpacity>
                   )}
 
@@ -3234,13 +3185,16 @@ function GunlukPlanScreen() {
                     onPress={() => openTaskModal(null)}
                     style={[
                       styles.primaryBtn,
-                      { backgroundColor: theme.accent },
+                      {
+                        backgroundColor: theme.accent,
+                        shadowColor: theme.accent,
+                      },
                     ]}
                   >
                     <Text
                       style={[styles.primaryBtnText, { color: theme.accentInk }]}
                     >
-                      ＋ Madde ekle
+                      ＋ Yeni Görev
                     </Text>
                   </TouchableOpacity>
                 )}
@@ -3763,22 +3717,40 @@ function GunlukPlanScreen() {
           contentContainerStyle={styles.mainContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Hero Kartı */}
+        {/* Hero Kartı (Yumuşak Gradyan & Derinlikli Gölge) */}
         <FadeSlideIn key={`hero-${activeTab.id}`} style={styles.heroLayer}>
-        <PopOnChange value={celebrateKey} scaleTo={1.035}>
+        <PopOnChange value={celebrateKey} scaleTo={1.03}>
         <View
           style={[
             styles.hero,
             {
               backgroundColor: theme.accent,
               borderRadius: theme.radius,
+              shadowColor: theme.accent,
             },
           ]}
         >
+          <SoftGradientOverlay
+            borderRadius={theme.radius}
+            startColor="rgba(255,255,255,0.24)"
+            endColor={theme.accentGradientEnd || 'rgba(0,0,0,0.2)'}
+          />
           <View style={styles.heroTop}>
-            <Animated.Text style={[styles.heroEmoji, emojiAnimatedStyle]}>
-              {activeTab.emoji}
-            </Animated.Text>
+            <View
+              style={[
+                styles.heroEmojiBadge,
+                {
+                  backgroundColor:
+                    theme.accentInk === '#111605'
+                      ? 'rgba(0,0,0,0.08)'
+                      : 'rgba(255,255,255,0.18)',
+                },
+              ]}
+            >
+              <Animated.Text style={[styles.heroEmoji, emojiAnimatedStyle]}>
+                {activeTab.emoji}
+              </Animated.Text>
+            </View>
             <View style={styles.heroTextWrap}>
               <Text
                 style={[
@@ -3793,7 +3765,7 @@ function GunlukPlanScreen() {
               </Text>
               <Text style={[styles.heroMotto, { color: theme.accentInk }]}>
                 {pct === 100 && tabHabits.length > 0
-                  ? '🎉 Bugünün tüm maddeleri tamam. Harikasın!'
+                  ? 'Bugünün tüm hedefleri tamamlandı. Harikasın!'
                   : activeTab.motto}
               </Text>
             </View>
@@ -3807,7 +3779,7 @@ function GunlukPlanScreen() {
               pct={pct}
               fillColor={theme.accentInk}
               shimmerColor={
-                theme.accentInk === '#ffffff'
+                theme.accentInk === '#FFFFFF' || theme.accentInk === '#ffffff'
                   ? withAlpha(theme.accent, 0.45)
                   : 'rgba(255,255,255,0.45)'
               }
@@ -3815,9 +3787,9 @@ function GunlukPlanScreen() {
                 styles.progressBarBg,
                 {
                   backgroundColor:
-                    theme.accentInk === '#111111'
-                      ? 'rgba(0,0,0,0.2)'
-                      : 'rgba(255,255,255,0.28)',
+                    theme.accentInk === '#111605'
+                      ? 'rgba(0,0,0,0.16)'
+                      : 'rgba(255,255,255,0.26)',
                 },
               ]}
             />
@@ -3851,23 +3823,23 @@ function GunlukPlanScreen() {
         </PopOnChange>
         </FadeSlideIn>
 
-        {/* Araç Çubuğu (Ay Seçimi + Sırala + Madde Ekle) */}
+        {/* Araç Çubuğu (Minimal Ay Seçici + Mikro-İkonlu Sırala + Madde Ekle) */}
         <View style={styles.toolbar}>
-          <View style={styles.monthNav}>
+          <View
+            style={[
+              styles.monthNavPill,
+              {
+                backgroundColor: theme.surface,
+                borderColor: theme.cardBorderColor,
+              },
+            ]}
+          >
             <TouchableOpacity
               onPress={() => changeMonth(-1)}
-              style={[
-                styles.iconBtn,
-                {
-                  backgroundColor: theme.surface,
-                  borderColor: theme.isDark
-                    ? 'rgba(255,255,255,0.18)'
-                    : 'rgba(0,0,0,0.15)',
-                },
-              ]}
+              style={styles.iconBtnMinimal}
               accessibilityLabel="Önceki ay"
             >
-              <Text style={[styles.iconBtnText, { color: theme.text }]}>‹</Text>
+              <Text style={[styles.iconBtnText, { color: theme.muted }]}>‹</Text>
             </TouchableOpacity>
 
             <Text
@@ -3884,18 +3856,10 @@ function GunlukPlanScreen() {
 
             <TouchableOpacity
               onPress={() => changeMonth(1)}
-              style={[
-                styles.iconBtn,
-                {
-                  backgroundColor: theme.surface,
-                  borderColor: theme.isDark
-                    ? 'rgba(255,255,255,0.18)'
-                    : 'rgba(0,0,0,0.15)',
-                },
-              ]}
+              style={styles.iconBtnMinimal}
               accessibilityLabel="Sonraki ay"
             >
-              <Text style={[styles.iconBtnText, { color: theme.text }]}>›</Text>
+              <Text style={[styles.iconBtnText, { color: theme.muted }]}>›</Text>
             </TouchableOpacity>
           </View>
 
@@ -3906,12 +3870,12 @@ function GunlukPlanScreen() {
                 styles.pillBtn,
                 {
                   backgroundColor: theme.surface,
-                  borderColor: theme.accent,
+                  borderColor: theme.cardBorderColor,
                 },
               ]}
             >
-              <Text style={[styles.pillBtnText, { color: theme.text }]}>
-                Bu aya dön
+              <Text style={[styles.pillBtnText, { color: theme.accent }]}>
+                Bugün
               </Text>
             </TouchableOpacity>
           )}
@@ -3930,20 +3894,25 @@ function GunlukPlanScreen() {
                     ? { backgroundColor: theme.accent }
                     : {
                         backgroundColor: theme.surface,
-                        borderColor: theme.accent,
+                        borderColor: theme.cardBorderColor,
                       },
                 ]}
               >
-                <Text
-                  style={[
-                    styles.pillBtnText,
-                    {
-                      color: reorderMode ? theme.accentInk : theme.text,
-                    },
-                  ]}
-                >
-                  {reorderMode ? '✓ Bitti' : '⇅ Sırala'}
-                </Text>
+                <View style={styles.btnContentRow}>
+                  {!reorderMode && (
+                    <MicroIcon name="sort" size={12} color={theme.muted} />
+                  )}
+                  <Text
+                    style={[
+                      styles.pillBtnText,
+                      {
+                        color: reorderMode ? theme.accentInk : theme.text,
+                      },
+                    ]}
+                  >
+                    {reorderMode ? '✓ Bitti' : 'Sırala'}
+                  </Text>
+                </View>
               </TouchableOpacity>
             )}
 
@@ -3952,35 +3921,37 @@ function GunlukPlanScreen() {
                 onPress={() => openEditor(null)}
                 style={[
                   styles.primaryBtn,
-                  { backgroundColor: theme.accent },
+                  {
+                    backgroundColor: theme.accent,
+                    shadowColor: theme.accent,
+                  },
                 ]}
               >
                 <Text
                   style={[styles.primaryBtnText, { color: theme.accentInk }]}
                 >
-                  ＋ Madde ekle
+                  ＋ Yeni Ekle
                 </Text>
               </TouchableOpacity>
             )}
           </View>
         </View>
 
-        {/* Alışkanlık Kartları */}
+        {/* Alışkanlık Kartları (Yumuşak Gölge, Geniş Padding, Mikro-İkonlar & Aktivite Çemberleri) */}
         {tabHabits.length === 0 ? (
           <View
             style={[
               styles.emptyBox,
               {
+                backgroundColor: withAlpha(theme.surface, 0.6),
                 borderRadius: theme.radius,
-                borderColor: theme.isDark
-                  ? 'rgba(255,255,255,0.2)'
-                  : 'rgba(0,0,0,0.18)',
+                borderColor: theme.cardBorderColor,
               },
             ]}
           >
             <FloatingEmoji emoji={activeTab.emoji} />
             <Text style={[styles.emptyText, { color: theme.muted }]}>
-              Bu sekmede henüz madde yok. “Madde ekle” ile başla.
+              Bu sekmede henüz madde yok. “＋ Yeni Ekle” ile başla.
             </Text>
           </View>
         ) : (
@@ -3998,11 +3969,7 @@ function GunlukPlanScreen() {
                         borderRadius: theme.radius,
                         borderColor: theme.cardBorderColor,
                         borderWidth: theme.cardBorderWidth,
-                        borderLeftWidth: theme.leftAccentBar
-                          ? 6
-                          : theme.cardBorderWidth,
-                        borderLeftColor:
-                          theme.leftAccentBar || theme.cardBorderColor,
+                        shadowColor: theme.isDark ? '#000' : theme.accent,
                       },
                     ]}
                   >
@@ -4011,12 +3978,12 @@ function GunlukPlanScreen() {
                         styles.dragHandleBadge,
                         {
                           backgroundColor: theme.isDark
-                            ? 'rgba(255,255,255,0.08)'
-                            : 'rgba(0,0,0,0.06)',
+                            ? 'rgba(255,255,255,0.06)'
+                            : 'rgba(0,0,0,0.04)',
                         },
                       ]}
                     >
-                      <Text style={{ color: theme.muted, fontSize: 18 }}>
+                      <Text style={{ color: theme.muted, fontSize: 16 }}>
                         ⠿
                       </Text>
                     </View>
@@ -4046,15 +4013,15 @@ function GunlukPlanScreen() {
                       style={[
                         styles.iconBtn,
                         {
-                          backgroundColor: theme.surface,
-                          borderColor: theme.isDark
-                            ? 'rgba(255,255,255,0.18)'
-                            : 'rgba(0,0,0,0.15)',
+                          backgroundColor: theme.isDark
+                            ? 'rgba(255,255,255,0.05)'
+                            : 'rgba(0,0,0,0.04)',
+                          borderColor: 'transparent',
                           opacity: i === 0 ? 0.3 : 1,
                         },
                       ]}
                     >
-                      <Text style={{ color: theme.text, fontSize: 13 }}>▲</Text>
+                      <Text style={{ color: theme.text, fontSize: 12 }}>▲</Text>
                     </TouchableOpacity>
                     <TouchableOpacity
                       disabled={i === tabHabits.length - 1}
@@ -4062,15 +4029,15 @@ function GunlukPlanScreen() {
                       style={[
                         styles.iconBtn,
                         {
-                          backgroundColor: theme.surface,
-                          borderColor: theme.isDark
-                            ? 'rgba(255,255,255,0.18)'
-                            : 'rgba(0,0,0,0.15)',
+                          backgroundColor: theme.isDark
+                            ? 'rgba(255,255,255,0.05)'
+                            : 'rgba(0,0,0,0.04)',
+                          borderColor: 'transparent',
                           opacity: i === tabHabits.length - 1 ? 0.3 : 1,
                         },
                       ]}
                     >
-                      <Text style={{ color: theme.text, fontSize: 13 }}>▼</Text>
+                      <Text style={{ color: theme.text, fontSize: 12 }}>▼</Text>
                     </TouchableOpacity>
                   </View>
                 );
@@ -4093,16 +4060,20 @@ function GunlukPlanScreen() {
                 !!h.goal && h.goal.type !== 'none' && h.goal.target > 0;
 
               let goalBadgeText = '';
+              let goalIconName: MicroIconName = 'timer';
               if (hasActiveGoal && h.goal) {
                 if (h.goal.type === 'timer') {
+                  goalIconName = 'timer';
                   goalBadgeText =
                     todayProg > 0 && todayProg < h.goal.target
-                      ? `⏱️ ${formatDuration(todayProg)} / ${formatTimerReadable(h.goal.target)}`
-                      : `⏱️ ${formatTimerReadable(h.goal.target)}`;
+                      ? `${formatDuration(todayProg)} / ${formatTimerReadable(h.goal.target)}`
+                      : `${formatTimerReadable(h.goal.target)}`;
                 } else if (h.goal.type === 'reps') {
-                  goalBadgeText = `🔁 ${todayProg}/${h.goal.target} tekrar`;
+                  goalIconName = 'repeat';
+                  goalBadgeText = `${todayProg}/${h.goal.target} tekrar`;
                 } else if (h.goal.type === 'amount') {
-                  goalBadgeText = `📊 ${todayProg}/${h.goal.target}${h.goal.unit ? ' ' + h.goal.unit : ''}`;
+                  goalIconName = 'chart';
+                  goalBadgeText = `${todayProg}/${h.goal.target}${h.goal.unit ? ' ' + h.goal.unit : ''}`;
                 }
               }
 
@@ -4120,16 +4091,12 @@ function GunlukPlanScreen() {
                       borderRadius: theme.radius,
                       borderColor: theme.cardBorderColor,
                       borderWidth: theme.cardBorderWidth,
-                      borderLeftWidth: theme.leftAccentBar
-                        ? 6
-                        : theme.cardBorderWidth,
-                      borderLeftColor:
-                        theme.leftAccentBar || theme.cardBorderColor,
-                      opacity: pressed ? 0.94 : 1,
+                      shadowColor: theme.isDark ? '#000000' : theme.accent,
+                      opacity: pressed ? 0.95 : 1,
                     },
                   ]}
                 >
-                  {/* Kart Üst Kısmı (Basılı tut: Düzenle · Dokun: Sayaç / Miktar) */}
+                  {/* Kart Üst Kısmı (Gelişmiş Tipografi + Mikro-İkonlu İstatistikler + Bugün Aktivite Çemberi) */}
                   <View style={styles.cardHead}>
                     <View style={styles.cardInfo}>
                       <View style={styles.cardTitleGroup}>
@@ -4152,41 +4119,88 @@ function GunlukPlanScreen() {
                           </Text>
                         )}
                       </View>
+
                       <View style={styles.cardStats}>
-                        <View style={styles.statWithIcon}>
-                          <StreakIcon streak={cur} style={styles.statIcon} />
+                        <View
+                          style={[
+                            styles.statMicroPill,
+                            {
+                              backgroundColor: theme.isDark
+                                ? 'rgba(255,255,255,0.05)'
+                                : withAlpha(theme.accent, 0.08),
+                            },
+                          ]}
+                        >
+                          <StreakIcon streak={cur} color={theme.accent} />
                           <Text style={[styles.statText, { color: theme.muted }]}>
-                            Zincir:{' '}
                             <Text style={[styles.statBold, { color: theme.text }]}>
                               {cur}
                             </Text>{' '}
                             gün
                           </Text>
                         </View>
-                        <Text style={[styles.statText, { color: theme.muted }]}>
-                          🏆 En uzun:{' '}
-                          <Text style={[styles.statBold, { color: theme.text }]}>
-                            {best}
+
+                        <View
+                          style={[
+                            styles.statMicroPill,
+                            {
+                              backgroundColor: theme.isDark
+                                ? 'rgba(255,255,255,0.05)'
+                                : 'rgba(0,0,0,0.035)',
+                            },
+                          ]}
+                        >
+                          <MicroIcon
+                            name="trophy"
+                            size={12}
+                            color={theme.accent}
+                          />
+                          <Text style={[styles.statText, { color: theme.muted }]}>
+                            Rekor{' '}
+                            <Text style={[styles.statBold, { color: theme.text }]}>
+                              {best}
+                            </Text>
                           </Text>
-                        </Text>
-                        <Text style={[styles.statText, { color: theme.muted }]}>
-                          📅 Bu ay:{' '}
-                          <Text style={[styles.statBold, { color: theme.text }]}>
-                            {monthDone}/{dim}
+                        </View>
+
+                        <View
+                          style={[
+                            styles.statMicroPill,
+                            {
+                              backgroundColor: theme.isDark
+                                ? 'rgba(255,255,255,0.05)'
+                                : 'rgba(0,0,0,0.035)',
+                            },
+                          ]}
+                        >
+                          <MicroIcon
+                            name="calendar"
+                            size={12}
+                            color={theme.accent}
+                          />
+                          <Text style={[styles.statText, { color: theme.muted }]}>
+                            <Text style={[styles.statBold, { color: theme.text }]}>
+                              {monthDone}
+                            </Text>
+                            /{dim}
                           </Text>
-                        </Text>
+                        </View>
+
                         {!!goalBadgeText && (
                           <View
                             style={[
                               styles.goalChip,
                               {
-                                backgroundColor: theme.isDark
-                                  ? 'rgba(255,255,255,0.1)'
-                                  : 'rgba(0,0,0,0.06)',
-                                borderColor: theme.accent,
+                                backgroundColor: withAlpha(theme.accent, 0.12),
+                                borderColor: withAlpha(theme.accent, 0.3),
                               },
                             ]}
                           >
+                            <MicroIcon
+                              name={goalIconName}
+                              size={11}
+                              color={theme.accent}
+                            />
                             <Text
                               style={[
                                 styles.goalChipText,
@@ -4200,13 +4214,36 @@ function GunlukPlanScreen() {
                       </View>
                     </View>
 
-                    {/* Bugün Butonu */}
+                    {/* Bugün Aktivite Çemberi & Minimal Etiketi */}
                     <View style={styles.cardActions}>
                       <View style={styles.todayBtnWrap}>
+                        <View
+                          pointerEvents="none"
+                          style={[
+                            styles.todayBadge,
+                            {
+                              backgroundColor: todayMarkObj
+                                ? todayMarkObj.color
+                                : withAlpha(theme.accent, 0.14),
+                            },
+                          ]}
+                        >
+                          <Text
+                            allowFontScaling={false}
+                            style={[
+                              styles.todayBadgeText,
+                              {
+                                color: todayMarkObj ? '#ffffff' : theme.accent,
+                              },
+                            ]}
+                          >
+                            BUGÜN
+                          </Text>
+                        </View>
                         <MarkPop
                           mark={todayMark}
                           color={todayMarkObj?.color}
-                          radiusStyle={getCellRadiusStyle(46)}
+                          radiusStyle={{ borderRadius: 999 }}
                           burst
                           burstColors={[
                             MARK_COLORS.green,
@@ -4221,17 +4258,23 @@ function GunlukPlanScreen() {
                           delayLongPress={380}
                           style={({ pressed }) => [
                             styles.todayBtn,
-                            getCellRadiusStyle(46),
                             {
                               backgroundColor: todayMarkObj
                                 ? todayMarkObj.color
                                 : theme.isDark
-                                ? 'rgba(255,255,255,0.08)'
-                                : 'rgba(0,0,0,0.06)',
+                                ? 'rgba(255,255,255,0.06)'
+                                : withAlpha(theme.accent, 0.08),
                               borderColor: todayMarkObj
-                                ? 'transparent'
+                                ? 'rgba(255,255,255,0.32)'
+                                : withAlpha(theme.accent, 0.55),
+                              shadowColor: todayMarkObj
+                                ? todayMarkObj.color
                                 : theme.accent,
-                              transform: [{ scale: pressed ? 0.92 : 1 }],
+                              shadowOpacity: todayMarkObj ? 0.38 : 0.12,
+                              shadowRadius: todayMarkObj ? 10 : 5,
+                              shadowOffset: { width: 0, height: 4 },
+                              elevation: todayMarkObj ? 4 : 1,
+                              transform: [{ scale: pressed ? 0.91 : 1 }],
                             },
                           ]}
                         >
@@ -4246,34 +4289,31 @@ function GunlukPlanScreen() {
                             {today.d}
                           </Text>
                           {todayMarkObj && (
-                            <Text style={styles.cellCornerSymbol}>
-                              {todayMarkObj.symbol}
-                            </Text>
+                            <View
+                              style={[
+                                styles.cellStatusBadge,
+                                {
+                                  backgroundColor: '#ffffff',
+                                },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.cellStatusSymbol,
+                                  { color: todayMarkObj.color },
+                                ]}
+                              >
+                                {todayMarkObj.symbol}
+                              </Text>
+                            </View>
                           )}
                         </Pressable>
                         </MarkPop>
-                        <View
-                          pointerEvents="none"
-                          style={[
-                            styles.todayBadge,
-                            { backgroundColor: theme.accent },
-                          ]}
-                        >
-                          <Text
-                            allowFontScaling={false}
-                            style={[
-                              styles.todayBadgeText,
-                              { color: theme.accentInk },
-                            ]}
-                          >
-                            BUGÜN
-                          </Text>
-                        </View>
                       </View>
                     </View>
                   </View>
 
-                  {/* Aylık Zincir Kutuları (7 Günlük Haftalık Görünüm & Yatay Kaydırma) */}
+                  {/* Aylık Aktivite Çemberleri (7 Günlük Haftalık Görünüm & Yatay Kaydırma) */}
                   <HabitWeekScroll
                     initialScrollX={initialScrollX}
                     rowViewportWidth={rowViewportWidth}
@@ -4292,8 +4332,8 @@ function GunlukPlanScreen() {
                           key={k}
                           mark={mark}
                           color={markObj?.color}
-                          radiusStyle={getCellRadiusStyle(cellSize)}
-                          ringScale={1.42}
+                          radiusStyle={{ borderRadius: 999 }}
+                          ringScale={1.38}
                         >
                         <Pressable
                           disabled={isFuture}
@@ -4302,20 +4342,33 @@ function GunlukPlanScreen() {
                           delayLongPress={380}
                           style={({ pressed }) => [
                             styles.chainCell,
-                            getCellRadiusStyle(cellSize),
                             {
                               width: cellSize,
                               height: cellSize,
+                              borderRadius: cellSize / 2,
                               backgroundColor: markObj
                                 ? markObj.color
+                                : isToday
+                                ? withAlpha(theme.accent, 0.12)
                                 : theme.isDark
-                                ? 'rgba(255,255,255,0.08)'
-                                : 'rgba(0,0,0,0.06)',
-                              borderColor:
-                                isToday && !markObj
-                                  ? theme.accent
-                                  : 'transparent',
-                              opacity: isFuture ? 0.32 : 1,
+                                ? 'rgba(255,255,255,0.055)'
+                                : 'rgba(0,0,0,0.04)',
+                              borderColor: markObj
+                                ? 'rgba(255,255,255,0.28)'
+                                : isToday
+                                ? theme.accent
+                                : theme.isDark
+                                ? 'rgba(255,255,255,0.07)'
+                                : 'rgba(0,0,0,0.04)',
+                              borderWidth: isToday && !markObj ? 2 : 1.2,
+                              shadowColor: markObj
+                                ? markObj.color
+                                : 'transparent',
+                              shadowOffset: { width: 0, height: 3 },
+                              shadowOpacity: markObj ? 0.34 : 0,
+                              shadowRadius: markObj ? 7 : 0,
+                              elevation: markObj ? 3 : 0,
+                              opacity: isFuture ? 0.3 : 1,
                               transform: [{ scale: pressed ? 0.88 : 1 }],
                             },
                           ]}
@@ -4324,16 +4377,34 @@ function GunlukPlanScreen() {
                             style={[
                               styles.chainCellText,
                               {
-                                color: markObj ? '#ffffff' : theme.muted,
+                                color: markObj
+                                  ? '#ffffff'
+                                  : isToday
+                                  ? theme.accent
+                                  : theme.muted,
+                                fontWeight:
+                                  markObj || isToday ? '800' : '600',
                               },
                             ]}
                           >
                             {d}
                           </Text>
                           {markObj && (
-                            <Text style={styles.cellCornerSymbol}>
-                              {markObj.symbol}
-                            </Text>
+                            <View
+                              style={[
+                                styles.cellStatusBadge,
+                                { backgroundColor: '#ffffff' },
+                              ]}
+                            >
+                              <Text
+                                style={[
+                                  styles.cellStatusSymbol,
+                                  { color: markObj.color },
+                                ]}
+                              >
+                                {markObj.symbol}
+                              </Text>
+                            </View>
                           )}
                         </Pressable>
                         </MarkPop>
@@ -4355,7 +4426,7 @@ function GunlukPlanScreen() {
                 style={[styles.dotSmall, { backgroundColor: MARK_COLORS.green }]}
               />
               <Text style={[styles.legendText, { color: theme.muted }]}>
-                Gün: dokun işaretle · basılı tut renk
+                Gün çemberi: dokun işaretle · basılı tut durum seç
               </Text>
             </View>
             <View style={styles.legendItem}>
@@ -4371,17 +4442,55 @@ function GunlukPlanScreen() {
       </ScrollView>
       )}
 
-      {/* Alt Sekme Çubuğu (Bottom Tab Bar) */}
+      {/* Yüzen Minimal Ayarlar Çarkı Butonu (Glassmorphism) */}
+      {!profileOpen && (
+        <TouchableOpacity
+          activeOpacity={0.85}
+          onPress={handleToggleProfile}
+          accessibilityLabel="Ayarlar ve Yedekleme"
+          style={[
+            styles.floatingGearBtn,
+            {
+              bottom: Math.max(insets.bottom, 8) + 74,
+              backgroundColor:
+                theme.surfaceGlass ||
+                withAlpha(theme.surface, theme.isDark ? 0.82 : 0.88),
+              borderColor: theme.isDark
+                ? 'rgba(255,255,255,0.12)'
+                : 'rgba(0,0,0,0.08)',
+              shadowColor: theme.isDark ? '#000' : theme.accent,
+            },
+            Platform.OS === 'web'
+              ? ({
+                  backdropFilter: 'blur(16px)',
+                  WebkitBackdropFilter: 'blur(16px)',
+                } as any)
+              : null,
+          ]}
+        >
+          <MicroIcon name="gear" size={18} color={theme.muted} />
+        </TouchableOpacity>
+      )}
+
+      {/* Alt Sekme Çubuğu (Glassmorphism Bottom Tab Bar) */}
       <View
         style={[
           styles.bottomTabBar,
           {
-            backgroundColor: theme.surface,
+            backgroundColor:
+              theme.surfaceGlass ||
+              withAlpha(theme.surface, theme.isDark ? 0.82 : 0.86),
             borderTopColor: theme.isDark
-              ? 'rgba(255,255,255,0.12)'
-              : 'rgba(0,0,0,0.09)',
+              ? 'rgba(255,255,255,0.08)'
+              : 'rgba(0,0,0,0.06)',
             paddingBottom: Math.max(insets.bottom, 8),
           },
+          Platform.OS === 'web'
+            ? ({
+                backdropFilter: 'blur(22px)',
+                WebkitBackdropFilter: 'blur(22px)',
+              } as any)
+            : null,
         ]}
       >
         <ScrollView
@@ -4396,41 +4505,82 @@ function GunlukPlanScreen() {
             ).length;
             const selected =
               !profileOpen && activeSection === 'rutin' && t.id === state.tab;
+            const inactiveGray = theme.isDark ? '#71717a' : '#8e8e93';
             return (
               <TouchableOpacity
                 key={t.id}
-                activeOpacity={0.75}
+                activeOpacity={0.78}
                 onPress={() => handleSelectTab(t.id)}
                 style={[
                   styles.tabBtn,
                   selected && {
-                    borderTopColor: t.color,
-                    backgroundColor: theme.isDark
-                      ? 'rgba(255,255,255,0.08)'
-                      : 'rgba(0,0,0,0.05)',
+                    backgroundColor: withAlpha(t.color, theme.isDark ? 0.16 : 0.12),
+                    borderColor: withAlpha(t.color, 0.28),
                   },
                 ]}
               >
-                <PopOnChange value={selected} when={selected} scaleTo={1.32} lift={5}>
-                  <Text style={styles.tabEmoji}>{t.emoji}</Text>
+                <PopOnChange value={selected} when={selected} scaleTo={1.24} lift={3}>
+                  <View
+                    style={[
+                      styles.tabEmojiWrap,
+                      !selected && styles.tabEmojiInactive,
+                    ]}
+                  >
+                    <Text style={styles.tabEmoji}>{t.emoji}</Text>
+                    {!selected && Platform.OS !== 'web' && (
+                      <View
+                        pointerEvents="none"
+                        style={styles.tabEmojiGrayscaleClip}
+                      >
+                        <Text
+                          style={[
+                            styles.tabEmoji,
+                            styles.tabEmojiShadowClone,
+                          ]}
+                        >
+                          {t.emoji}
+                        </Text>
+                      </View>
+                    )}
+                  </View>
                 </PopOnChange>
                 <Text
                   numberOfLines={1}
                   style={[
                     styles.tabName,
-                    { color: selected ? theme.text : theme.muted },
+                    {
+                      color: selected ? theme.text : inactiveGray,
+                      fontWeight: selected ? '700' : '600',
+                    },
                   ]}
                 >
                   {t.name}
                 </Text>
-                <Text
+                <View
                   style={[
-                    styles.tabCount,
-                    { color: selected ? theme.text : theme.muted },
+                    styles.tabCountPill,
+                    {
+                      backgroundColor: selected
+                        ? t.color
+                        : theme.isDark
+                        ? 'rgba(161, 161, 170, 0.14)'
+                        : 'rgba(142, 142, 147, 0.15)',
+                    },
                   ]}
                 >
-                  {done}/{hs.length}
-                </Text>
+                  <Text
+                    style={[
+                      styles.tabCount,
+                      {
+                        color: selected
+                          ? t.theme.accentInk
+                          : inactiveGray,
+                      },
+                    ]}
+                  >
+                    {done}/{hs.length}
+                  </Text>
+                </View>
               </TouchableOpacity>
             );
           })}
@@ -6381,58 +6531,74 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingVertical: 8,
+    paddingVertical: 10,
     paddingHorizontal: 16,
     borderBottomWidth: 1,
+    zIndex: 20,
   },
   topbarLeft: {
     flexDirection: 'row',
     alignItems: 'center',
   },
+  topbarRightActions: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
   backToHomeBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    paddingVertical: 2,
-    paddingRight: 8,
+    paddingVertical: 5,
+    paddingHorizontal: 12,
+    borderRadius: 999,
   },
   backToHomeArrow: {
-    fontSize: 24,
-    lineHeight: 24,
+    fontSize: 22,
+    lineHeight: 22,
     fontWeight: '700',
   },
   appTitle: {
-    fontSize: 16,
-    fontWeight: '800',
+    fontSize: 15.5,
+    fontWeight: '700',
+    letterSpacing: -0.2,
   },
   topModeTabs: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    padding: 3.5,
+    borderRadius: 999,
+    borderWidth: 1,
+    gap: 4,
   },
   topModeTabBtn: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    borderBottomWidth: 3,
-    borderBottomColor: 'transparent',
+    paddingHorizontal: 14,
+    borderRadius: 999,
+  },
+  topModeTabBtnActive: {
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.08,
+    shadowRadius: 6,
+    elevation: 2,
   },
   topModeTabText: {
-    fontSize: 15.5,
+    fontSize: 13.5,
+    letterSpacing: -0.15,
   },
   topModeBadge: {
-    minWidth: 20,
-    height: 20,
+    minWidth: 19,
+    height: 19,
     borderRadius: 10,
     paddingHorizontal: 5,
     alignItems: 'center',
     justifyContent: 'center',
   },
   topModeBadgeText: {
-    fontSize: 11.5,
+    fontSize: 11,
     fontWeight: '800',
     fontVariant: ['tabular-nums'],
   },
@@ -6443,9 +6609,9 @@ const styles = StyleSheet.create({
   },
   taskFilterBtn: {
     borderRadius: 999,
-    paddingVertical: 7,
-    paddingHorizontal: 13,
-    borderWidth: 1.8,
+    paddingVertical: 8,
+    paddingHorizontal: 14,
+    borderWidth: 1,
   },
   taskFilterBtnText: {
     fontSize: 13,
@@ -6454,30 +6620,30 @@ const styles = StyleSheet.create({
   quickTaskBar: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    marginBottom: 10,
+    gap: 12,
+    paddingVertical: 12,
+    paddingHorizontal: 16,
+    marginBottom: 14,
   },
   quickTaskInput: {
     flex: 1,
-    fontSize: 15.5,
+    fontSize: 15,
     paddingVertical: 4,
   },
   taskCard: {
-    paddingVertical: 12,
-    paddingHorizontal: 12,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
   },
   taskMainRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
-    gap: 12,
+    gap: 14,
   },
   taskCircleCheck: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    borderWidth: 2.2,
+    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
     marginTop: 1,
@@ -6489,15 +6655,17 @@ const styles = StyleSheet.create({
   },
   taskBodyPressable: {
     flex: 1,
-    gap: 3,
+    gap: 4,
   },
   taskItemTitle: {
-    fontSize: 16,
+    fontSize: 16.5,
     fontWeight: '700',
-    lineHeight: 21,
+    letterSpacing: -0.25,
+    lineHeight: 22,
   },
   taskItemDetail: {
     fontSize: 13,
+    fontWeight: '500',
     lineHeight: 18,
   },
   taskMetaRow: {
@@ -6507,14 +6675,14 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   taskDateChip: {
-    paddingHorizontal: 9,
-    paddingVertical: 3,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     borderRadius: 99,
     borderWidth: 1,
   },
   taskDateChipText: {
     fontSize: 11.5,
-    fontWeight: '700',
+    fontWeight: '600',
   },
   taskStarBtn: {
     paddingHorizontal: 4,
@@ -6523,12 +6691,12 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   taskStarIcon: {
-    fontSize: 21,
+    fontSize: 20,
     lineHeight: 24,
   },
   taskSubtasksContainer: {
-    marginTop: 10,
-    marginLeft: 36,
+    marginTop: 12,
+    marginLeft: 38,
     gap: 8,
   },
   taskSubtaskRow: {
@@ -6555,9 +6723,9 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   completedSectionCard: {
-    marginTop: 14,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    marginTop: 16,
+    paddingVertical: 14,
+    paddingHorizontal: 18,
   },
   completedHeaderRow: {
     flexDirection: 'row',
@@ -6570,7 +6738,7 @@ const styles = StyleSheet.create({
   },
   completedHeaderTitle: {
     fontSize: 14.5,
-    fontWeight: '800',
+    fontWeight: '700',
   },
   clearCompletedBtn: {
     paddingVertical: 4,
@@ -6610,31 +6778,41 @@ const styles = StyleSheet.create({
     width: 36,
     height: 36,
     borderRadius: 18,
-    borderWidth: 2,
+    borderWidth: 1.2,
     alignItems: 'center',
     justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.06,
+    shadowRadius: 6,
+    elevation: 2,
   },
   profileCircleInitials: {
-    fontSize: 13,
+    fontSize: 12.5,
     fontWeight: '800',
     letterSpacing: 0.4,
   },
   profileCircleEmoji: {
-    fontSize: 16,
+    fontSize: 15,
   },
   profileHeaderCard: {
     alignItems: 'center',
-    paddingVertical: 20,
-    paddingHorizontal: 16,
+    paddingVertical: 24,
+    paddingHorizontal: 18,
     marginBottom: 14,
   },
   profileBigAvatar: {
-    width: 74,
-    height: 74,
-    borderRadius: 37,
+    width: 76,
+    height: 76,
+    borderRadius: 38,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 10,
+    marginBottom: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 4,
   },
   profileBigInitials: {
     fontSize: 26,
@@ -6647,44 +6825,46 @@ const styles = StyleSheet.create({
   profileDisplayName: {
     fontSize: 20,
     fontWeight: '800',
+    letterSpacing: -0.3,
     textAlign: 'center',
   },
   profileSubtitle: {
     fontSize: 13,
-    marginTop: 3,
+    marginTop: 4,
     textAlign: 'center',
   },
   profileStatsRow: {
     flexDirection: 'row',
-    gap: 8,
-    marginTop: 16,
+    gap: 10,
+    marginTop: 18,
     width: '100%',
   },
   profileStatBox: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: 12,
     paddingHorizontal: 8,
-    borderRadius: 12,
+    borderRadius: 16,
     alignItems: 'center',
   },
   profileStatVal: {
-    fontSize: 16,
+    fontSize: 16.5,
     fontWeight: '800',
     fontVariant: ['tabular-nums'],
   },
   profileStatLbl: {
     fontSize: 11.5,
-    marginTop: 2,
+    marginTop: 3,
     fontWeight: '600',
     textAlign: 'center',
   },
   profileSectionCard: {
-    padding: 16,
+    padding: 18,
     marginBottom: 14,
   },
   profileSectionTitle: {
     fontSize: 17,
     fontWeight: '800',
+    letterSpacing: -0.25,
     marginBottom: 10,
   },
   profileSectionDesc: {
@@ -6702,7 +6882,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     paddingVertical: 9,
     paddingHorizontal: 12,
-    borderRadius: 10,
+    borderRadius: 12,
     borderWidth: 1,
     alignItems: 'center',
   },
@@ -6711,8 +6891,8 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   backupInfoBox: {
-    padding: 12,
-    borderRadius: 12,
+    padding: 14,
+    borderRadius: 16,
     borderWidth: 1,
     gap: 8,
     marginBottom: 14,
@@ -6736,94 +6916,151 @@ const styles = StyleSheet.create({
   profileBackupBtns: {
     gap: 10,
   },
+  floatingGearBtn: {
+    position: 'absolute',
+    right: 16,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.14,
+    shadowRadius: 14,
+    elevation: 6,
+    zIndex: 30,
+  },
   bottomTabBar: {
     borderTopWidth: 1,
-    paddingTop: 4,
-    paddingHorizontal: 8,
+    paddingTop: 8,
+    paddingHorizontal: 10,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: -3 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 8,
+    shadowOffset: { width: 0, height: -6 },
+    shadowOpacity: 0.06,
+    shadowRadius: 16,
+    elevation: 10,
   },
   tabsScroll: {
     flexDirection: 'row',
-    gap: 6,
+    gap: 8,
   },
   tabBtn: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderTopWidth: 3.5,
-    borderTopColor: 'transparent',
-    borderBottomLeftRadius: 10,
-    borderBottomRightRadius: 10,
-    minWidth: 78,
+    paddingVertical: 7,
+    paddingHorizontal: 13,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'transparent',
+    minWidth: 82,
+    gap: 2,
+  },
+  tabEmojiWrap: {
+    position: 'relative',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  tabEmojiInactive: {
+    opacity: 0.55,
+    filter: [{ grayscale: 1 }],
+  },
+  tabEmojiGrayscaleClip: {
+    position: 'absolute',
+    top: 0,
+    right: 0,
+    bottom: 0,
+    left: 0,
+    overflow: 'hidden',
+    mixBlendMode: 'saturation',
+  },
+  tabEmojiShadowClone: {
+    position: 'absolute',
+    left: -48,
+    top: 0,
+    paddingRight: 48,
+    textShadowColor: '#808080',
+    textShadowOffset: { width: 48, height: 0 },
+    textShadowRadius: 0,
   },
   tabEmoji: {
-    fontSize: 20,
-    marginBottom: 2,
+    fontSize: 19,
+    marginBottom: 1,
   },
   tabName: {
-    fontSize: 12,
-    fontWeight: '600',
+    fontSize: 11.5,
+    letterSpacing: -0.1,
+  },
+  tabCountPill: {
+    marginTop: 2,
+    paddingHorizontal: 7,
+    paddingVertical: 1.5,
+    borderRadius: 999,
   },
   tabCount: {
-    fontSize: 11,
-    opacity: 0.85,
-    marginTop: 1,
+    fontSize: 10.5,
+    fontWeight: '700',
     fontVariant: ['tabular-nums'],
   },
   mainScroll: {
     flex: 1,
   },
   mainContent: {
-    padding: 14,
-    paddingBottom: 28,
+    paddingHorizontal: 16,
+    paddingTop: 12,
+    paddingBottom: 64,
   },
   hero: {
-    padding: 16,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.18,
-    shadowRadius: 12,
-    elevation: 4,
+    paddingVertical: 11,
+    paddingHorizontal: 15,
+    overflow: 'hidden',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.22,
+    shadowRadius: 18,
+    elevation: 5,
   },
   heroTop: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
+    gap: 11,
+  },
+  heroEmojiBadge: {
+    width: 38,
+    height: 38,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   heroEmoji: {
-    fontSize: 36,
+    fontSize: 21,
   },
   heroTextWrap: {
     flex: 1,
   },
   heroTitle: {
-    fontSize: 21,
+    fontSize: 17.5,
     fontWeight: '800',
+    letterSpacing: -0.35,
   },
   heroMotto: {
-    fontSize: 13.5,
-    fontStyle: 'italic',
-    opacity: 0.92,
-    marginTop: 2,
+    fontSize: 12,
+    fontWeight: '500',
+    opacity: 0.9,
+    marginTop: 1,
   },
   progressRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginTop: 12,
+    gap: 8,
+    marginTop: 8,
   },
   progressLabel: {
-    fontSize: 13,
+    fontSize: 11.5,
     fontWeight: '700',
   },
   progressBarBg: {
     flex: 1,
-    height: 8,
+    height: 5.5,
     borderRadius: 99,
     overflow: 'hidden',
   },
@@ -6845,19 +7082,40 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     flexWrap: 'wrap',
     gap: 8,
-    marginTop: 12,
-    marginBottom: 10,
+    marginTop: 16,
+    marginBottom: 14,
   },
   monthNav: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 4,
   },
+  monthNavPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 4,
+    paddingHorizontal: 6,
+    borderRadius: 999,
+    borderWidth: 1,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.04,
+    shadowRadius: 8,
+    elevation: 1,
+  },
   monthTitle: {
-    minWidth: 128,
+    minWidth: 116,
     textAlign: 'center',
-    fontSize: 15.5,
+    fontSize: 14,
     fontWeight: '700',
+    letterSpacing: -0.2,
+  },
+  iconBtnMinimal: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   iconBtn: {
     width: 34,
@@ -6868,8 +7126,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   iconBtnText: {
-    fontSize: 20,
-    lineHeight: 22,
+    fontSize: 19,
+    lineHeight: 20,
     fontWeight: '600',
   },
   toolbarRight: {
@@ -6878,30 +7136,40 @@ const styles = StyleSheet.create({
     gap: 8,
     marginLeft: 'auto',
   },
+  btnContentRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
   primaryBtn: {
     borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    paddingVertical: 9,
+    paddingHorizontal: 15,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 10,
+    elevation: 3,
   },
   primaryBtnText: {
-    fontSize: 13.5,
+    fontSize: 13,
     fontWeight: '700',
+    letterSpacing: -0.1,
   },
   pillBtn: {
     borderRadius: 999,
-    paddingVertical: 7,
+    paddingVertical: 8,
     paddingHorizontal: 13,
-    borderWidth: 1.8,
+    borderWidth: 1,
   },
   pillBtnText: {
-    fontSize: 13,
-    fontWeight: '700',
+    fontSize: 12.5,
+    fontWeight: '600',
   },
   ghostBtn: {
     borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderWidth: 1.8,
+    paddingVertical: 9,
+    paddingHorizontal: 15,
+    borderWidth: 1.4,
   },
   ghostBtnText: {
     fontSize: 13.5,
@@ -6909,93 +7177,109 @@ const styles = StyleSheet.create({
   },
   dangerBtn: {
     borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    borderWidth: 1.8,
-    borderColor: '#dc2626',
+    paddingVertical: 9,
+    paddingHorizontal: 15,
+    borderWidth: 1.4,
+    borderColor: '#f43f5e',
   },
   dangerBtnConfirm: {
-    backgroundColor: '#dc2626',
+    backgroundColor: '#f43f5e',
   },
   dangerBtnText: {
     fontSize: 13.5,
     fontWeight: '700',
-    color: '#dc2626',
+    color: '#f43f5e',
   },
   emptyBox: {
-    paddingVertical: 36,
-    paddingHorizontal: 16,
-    borderWidth: 2,
+    paddingVertical: 40,
+    paddingHorizontal: 20,
+    borderWidth: 1.5,
     borderStyle: 'dashed',
     alignItems: 'center',
   },
   emptyText: {
     fontSize: 14,
     textAlign: 'center',
+    lineHeight: 20,
   },
   cardsList: {
-    gap: 10,
+    gap: 14,
   },
   card: {
-    padding: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.08,
-    shadowRadius: 8,
-    elevation: 2,
+    paddingVertical: 16,
+    paddingHorizontal: 18,
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.075,
+    shadowRadius: 20,
+    elevation: 3,
   },
   compactCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
+    gap: 12,
+    paddingVertical: 12,
   },
   dragHandleBadge: {
-    width: 40,
-    height: 40,
-    borderRadius: 10,
+    width: 38,
+    height: 38,
+    borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
   },
   compactInfo: {
     flex: 1,
+    gap: 2,
   },
   cardHead: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     justifyContent: 'space-between',
-    gap: 10,
+    gap: 12,
   },
   cardInfo: {
     flex: 1,
-    gap: 4,
+    gap: 10,
   },
   cardTitleGroup: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    flexWrap: 'wrap',
-    gap: 6,
+    flexDirection: 'column',
+    alignItems: 'flex-start',
+    gap: 3,
   },
   cardTitle: {
-    fontSize: 16,
+    fontSize: 17,
     fontWeight: '700',
+    letterSpacing: -0.3,
+    lineHeight: 22,
   },
   cardDetail: {
-    fontSize: 12.5,
+    fontSize: 13,
+    fontWeight: '500',
+    lineHeight: 18,
+    opacity: 0.88,
   },
   cardStats: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 10,
-    marginTop: 2,
+    alignItems: 'center',
+    gap: 6,
+  },
+  statMicroPill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4.5,
+    paddingHorizontal: 8.5,
+    paddingVertical: 4,
+    borderRadius: 999,
   },
   statText: {
-    fontSize: 12,
+    fontSize: 11.5,
+    fontWeight: '500',
+    fontVariant: ['tabular-nums'],
   },
   statWithIcon: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 3,
+    gap: 4,
   },
   statIcon: {
     fontSize: 12,
@@ -7016,63 +7300,77 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   todayBtnWrap: {
-    position: 'relative',
     alignItems: 'center',
     justifyContent: 'center',
-    paddingTop: 7,
-    minWidth: 56,
+    gap: 5,
+    minWidth: 52,
   },
   todayBtn: {
-    width: 46,
-    height: 46,
-    borderWidth: 2.5,
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    borderWidth: 1.8,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
   },
   todayBadge: {
-    position: 'absolute',
-    top: 0,
     paddingHorizontal: 7,
-    paddingVertical: 1.5,
-    borderRadius: 99,
+    paddingVertical: 2,
+    borderRadius: 999,
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 2,
   },
   todayBadgeText: {
     fontSize: 8.5,
     fontWeight: '800',
-    letterSpacing: 0.2,
+    letterSpacing: 0.5,
     textAlign: 'center',
   },
   todayBtnNum: {
     fontSize: 14,
     fontWeight: '800',
-    marginTop: 2,
+    fontVariant: ['tabular-nums'],
   },
   chainScroll: {
-    // Dalga halkası animasyonu kırpılmasın diye dikey boşluk artırıldı; net yükseklik aynı kalır
-    marginTop: 2,
-    marginBottom: -8,
+    marginTop: 8,
+    marginBottom: -6,
     alignSelf: 'center',
   },
   chainRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 8,
     paddingVertical: 10,
   },
   chainCell: {
-    borderWidth: 2,
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
   },
   chainCellText: {
-    fontSize: 12,
-    fontWeight: '700',
+    fontSize: 12.5,
     fontVariant: ['tabular-nums'],
+  },
+  cellStatusBadge: {
+    position: 'absolute',
+    right: -1,
+    bottom: -1,
+    width: 14,
+    height: 14,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.18,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  cellStatusSymbol: {
+    fontSize: 8.5,
+    fontWeight: '900',
+    lineHeight: 10,
   },
   cellCornerSymbol: {
     position: 'absolute',
@@ -7083,7 +7381,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
   },
   footer: {
-    marginTop: 22,
+    marginTop: 24,
     alignItems: 'center',
     gap: 8,
   },
@@ -7099,12 +7397,13 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   dotSmall: {
-    width: 11,
-    height: 11,
-    borderRadius: 6,
+    width: 9,
+    height: 9,
+    borderRadius: 5,
   },
   legendText: {
-    fontSize: 12.5,
+    fontSize: 12,
+    fontWeight: '500',
   },
   backupRow: {
     flexDirection: 'row',
@@ -7122,7 +7421,7 @@ const styles = StyleSheet.create({
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.48)',
+    backgroundColor: 'rgba(8, 10, 15, 0.52)',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -7134,14 +7433,14 @@ const styles = StyleSheet.create({
     padding: 18,
   },
   menuSheet: {
-    width: 260,
-    padding: 10,
-    borderRadius: 18,
+    width: 268,
+    padding: 12,
+    borderRadius: 22,
     borderWidth: 1,
     shadowColor: '#000',
-    shadowOffset: { width: 0, height: 12 },
-    shadowOpacity: 0.35,
-    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 16 },
+    shadowOpacity: 0.28,
+    shadowRadius: 24,
     elevation: 8,
   },
   menuTitle: {
@@ -7156,7 +7455,7 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingVertical: 12,
     paddingHorizontal: 10,
-    borderRadius: 12,
+    borderRadius: 14,
   },
   dotMedium: {
     width: 18,
@@ -7183,17 +7482,18 @@ const styles = StyleSheet.create({
     padding: 22,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 16 },
-    shadowOpacity: 0.4,
-    shadowRadius: 24,
+    shadowOpacity: 0.32,
+    shadowRadius: 28,
     elevation: 10,
   },
   editorTitle: {
     fontSize: 20,
     fontWeight: '800',
+    letterSpacing: -0.3,
     marginBottom: 14,
   },
   inputLabel: {
-    fontSize: 14,
+    fontSize: 13.5,
     fontWeight: '700',
     marginBottom: 6,
   },
@@ -7201,9 +7501,9 @@ const styles = StyleSheet.create({
     width: '100%',
     paddingVertical: 12,
     paddingHorizontal: 14,
-    borderWidth: 1.8,
-    borderRadius: 12,
-    fontSize: 16,
+    borderWidth: 1.4,
+    borderRadius: 14,
+    fontSize: 15.5,
     marginBottom: 14,
   },
   editorActions: {
@@ -7213,9 +7513,12 @@ const styles = StyleSheet.create({
     marginTop: 12,
   },
   goalChip: {
-    paddingHorizontal: 8,
-    paddingVertical: 2.5,
-    borderRadius: 99,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4.5,
+    paddingHorizontal: 9,
+    paddingVertical: 4,
+    borderRadius: 999,
     borderWidth: 1,
   },
   goalChipText: {

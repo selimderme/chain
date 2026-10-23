@@ -6,13 +6,24 @@ const LONG_PRESS_MS = 450;
 const MOVE_TOLERANCE = 10;
 
 const TABS = [
-  { id: 'beslenme', name: 'Beslenme',          emoji: '🥗', color: '#f97316', motto: 'Vücuduna iyi bak, o da sana iyi baksın.' },
-  { id: 'egzersiz', name: 'Egzersiz',          emoji: '💪', color: '#d4ff00', motto: 'Zinciri kırma. Bugün de çalış.' },
-  { id: 'bakim',    name: 'Kişisel Bakım',     emoji: '🧴', color: '#ec4899', motto: 'Kendine nazik ol, kendini şımart.' },
-  { id: 'ogrenme',  name: 'Öğrenme ve Gelişim', emoji: '📚', color: '#1e40af', motto: 'Her gün biraz daha bilge.' },
-  { id: 'ibadet',   name: 'İbadet',            emoji: '🕌', color: '#b8860b', motto: 'Kalbine huzur, gününe bereket.' },
-  { id: 'kotu-aliskanliklar', name: 'Kötü Alışkanlıklar', emoji: '🚫', color: '#ef4444', motto: 'Kötü alışkanlıkları bırak, hayatına yer aç.' },
+  { id: 'beslenme', name: 'Beslenme',          emoji: '🥗', color: '#ea7826', motto: 'Vücuduna iyi bak, o da sana iyi baksın.' },
+  { id: 'egzersiz', name: 'Egzersiz',          emoji: '💪', color: '#a3e635', motto: 'Zinciri kırma. Bugün de çalış.' },
+  { id: 'bakim',    name: 'Kişisel Bakım',     emoji: '🧴', color: '#db548d', motto: 'Kendine nazik ol, kendini şımart.' },
+  { id: 'ogrenme',  name: 'Öğrenme ve Gelişim', emoji: '📚', color: '#3b82f6', motto: 'Her gün biraz daha bilge.' },
+  { id: 'ibadet',   name: 'İbadet',            emoji: '🕌', color: '#b88917', motto: 'Kalbine huzur, gününe bereket.' },
+  { id: 'kotu-aliskanliklar', name: 'Kötü Alışkanlıklar', emoji: '🚫', color: '#e1495c', motto: 'Kötü alışkanlıkları bırak, hayatına yer aç.' },
 ];
+
+const ICONS = {
+  flame: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z"/></svg>',
+  trophy: '<svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>',
+  calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>',
+  timer: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="13" r="8"/><path d="M12 9v4l2.5 2.5"/><path d="M10 2h4"/></svg>',
+  repeat: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.1" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m17 2 4 4-4 4"/><path d="M3 11v-1a4 4 0 0 1 4-4h14"/><path d="m7 22-4-4 4-4"/><path d="M21 13v1a4 4 0 0 1-4 4H3"/></svg>',
+  chart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><line x1="18" x2="18" y1="20" y2="10"/><line x1="12" x2="12" y1="20" y2="4"/><line x1="6" x2="6" y1="20" y2="14"/></svg>',
+  user: '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>',
+  sort: '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m3 16 4 4 4-4"/><path d="M7 20V4"/><path d="m21 8-4-4-4 4"/><path d="M17 4v16"/></svg>',
+};
 
 const MARKS = {
   g: { label: 'Yeşil – Tamamlandı' },
@@ -226,8 +237,12 @@ function render() {
   const initials = getInitials(state.profile?.firstName, state.profile?.lastName);
   const pBtn = $('#profileBtn');
   if (pBtn) {
-    pBtn.textContent = initials || '👤';
+    pBtn.innerHTML = initials ? esc(initials) : ICONS.user;
     pBtn.classList.toggle('active', profileOpen);
+  }
+  const gBtn = $('#floatingGearBtn');
+  if (gBtn) {
+    gBtn.classList.toggle('active', profileOpen);
   }
   $('#topModeTabs')?.querySelectorAll('[data-section]').forEach((b) => {
     b.classList.toggle('active', !profileOpen && b.dataset.section === activeSec);
@@ -269,13 +284,13 @@ function renderTasksPanel() {
         <span style="${st.done ? 'text-decoration:line-through;color:var(--muted)' : ''}">${esc(st.title)}</span>
       </button>
     `).join('');
-    return `<article class="card" data-task-item="${t.id}" style="padding:12px">
+    return `<article class="card" data-task-item="${t.id}" style="padding:14px 16px">
       <div class="task-row">
         <button type="button" class="task-circle" data-task-done="${t.id}" aria-label="Görevi tamamla"></button>
         <div class="task-body" data-task-edit="${t.id}">
           <h4>${esc(t.title)}</h4>
           ${t.detail ? `<p class="detail">${esc(t.detail)}</p>` : ''}
-          ${t.dueDate ? `<div style="margin-top:5px"><span class="goal-chip">📅 ${esc(t.dueDate)}</span></div>` : ''}
+          ${t.dueDate ? `<div style="margin-top:6px"><span class="goal-chip">${ICONS.calendar} ${esc(t.dueDate)}</span></div>` : ''}
         </div>
         <button type="button" class="task-star-btn ${t.starred ? 'starred' : ''}" data-task-star="${t.id}" aria-label="Yıldızla">${t.starred ? '★' : '☆'}</button>
       </div>
@@ -323,7 +338,7 @@ function renderTasksPanel() {
       <button type="button" class="${taskFilter === 'all' ? 'primary' : 'pill'}" data-task-filter="all">Görevlerim (${activeAll.length})</button>
       <button type="button" class="${taskFilter === 'starred' ? 'primary' : 'pill'}" data-task-filter="starred">★ Yıldızlı (${starredCount})</button>
       <span class="spacer"></span>
-      ${taskFilter === 'all' && (activeAll.length > 1 || taskReorderMode) ? `<button type="button" class="${taskReorderMode ? 'primary' : 'pill'}" data-task-reorder>${taskReorderMode ? '✓ Bitti' : '⇅ Sırala'}</button>` : ''}
+      ${taskFilter === 'all' && (activeAll.length > 1 || taskReorderMode) ? `<button type="button" class="${taskReorderMode ? 'primary' : 'pill'}" data-task-reorder>${taskReorderMode ? '✓ Bitti' : `${ICONS.sort} Sırala`}</button>` : ''}
       ${taskReorderMode ? '' : '<button type="button" class="primary" data-task-add>＋ Madde ekle</button>'}
     </div>
     ${taskReorderMode ? '' : `
@@ -350,35 +365,19 @@ function renderProfilePage() {
     <div class="profile-page">
       <div style="display:flex;align-items:center;justify-content:space-between">
         <button type="button" class="pill" data-close-profile>‹ Geri Dön</button>
-        <h2 style="margin:0;font-size:1.2rem">Profil</h2>
+        <h2 style="margin:0;font-size:1.2rem">Profil ve Ayarlar</h2>
         <span style="width:80px"></span>
       </div>
 
       <article class="card" style="text-align:center;padding:20px 16px">
-        <div class="profile-avatar-lg">${esc(initials || '👤')}</div>
+        <div class="profile-avatar-lg">${initials ? esc(initials) : ICONS.user}</div>
         <h3 style="margin:0;font-size:1.25rem">${esc(fullName || 'Misafir Kullanıcı')}</h3>
-        <p class="detail" style="margin-top:4px">${fullName ? 'Günlük Plan Profili' : 'Aşağıdan adınızı ve soyadınızı kaydedebilirsiniz'}</p>
+        <p class="detail" style="margin-top:4px">${fullName ? 'Günlük Plan Profili' : 'Günlük Plan Özeti'}</p>
         <div class="profile-stats-grid">
           <div class="profile-stat-box"><b>${state.habits.length}</b><small>Toplam Madde</small></div>
           <div class="profile-stat-box"><b style="color:var(--green)">${allDoneToday}/${state.habits.length}</b><small>Bugün Tamam</small></div>
           <div class="profile-stat-box"><b>${maxBest} gün</b><small>En Uzun Zincir</small></div>
         </div>
-      </article>
-
-      <article class="card" style="padding:18px">
-        <h3 style="margin:0 0 12px;font-size:1.05rem">👤 Kişisel Bilgiler</h3>
-        <div class="field-block">
-          <label class="field-label">Ad
-            <input type="text" id="profFirstName" maxlength="40" value="${esc(state.profile?.firstName || '')}" placeholder="Adınızı girin" style="display:block;width:100%;margin-top:6px;padding:10px 12px;border-radius:10px;border:1.5px solid color-mix(in srgb, var(--text) 18%, transparent);background:color-mix(in srgb, var(--text) 5%, transparent)">
-          </label>
-        </div>
-        <div class="field-block">
-          <label class="field-label">Soyad
-            <input type="text" id="profLastName" maxlength="40" value="${esc(state.profile?.lastName || '')}" placeholder="Soyadınızı girin" style="display:block;width:100%;margin-top:6px;padding:10px 12px;border-radius:10px;border:1.5px solid color-mix(in srgb, var(--text) 18%, transparent);background:color-mix(in srgb, var(--text) 5%, transparent)">
-          </label>
-        </div>
-        <button type="button" class="primary" style="width:100%;padding:11px" data-save-profile>✓ Bilgileri Kaydet</button>
-        ${profileSavedMsg ? '<div class="profile-toast">✓ Ad ve soyad bilgileriniz başarıyla kaydedildi.</div>' : ''}
       </article>
 
       <article class="card" style="padding:18px">
@@ -461,15 +460,16 @@ function renderPanel(tab) {
     if (h.goal && h.goal.type !== 'none' && h.goal.target > 0) {
       if (h.goal.type === 'timer') {
         const txt = todayProg > 0 && todayProg < h.goal.target
-          ? `⏱️ ${fmtDuration(todayProg)} / ${fmtTimerReadable(h.goal.target)}`
-          : `⏱️ ${fmtTimerReadable(h.goal.target)}`;
-        goalChip = `<span class="goal-chip">${esc(txt)}</span>`;
+          ? `${fmtDuration(todayProg)} / ${fmtTimerReadable(h.goal.target)}`
+          : fmtTimerReadable(h.goal.target);
+        goalChip = `<span class="goal-chip">${ICONS.timer} ${esc(txt)}</span>`;
       } else if (h.goal.type === 'reps') {
-        goalChip = `<span class="goal-chip">🔁 ${todayProg}/${h.goal.target} tekrar</span>`;
+        goalChip = `<span class="goal-chip">${ICONS.repeat} ${todayProg}/${h.goal.target} tekrar</span>`;
       } else if (h.goal.type === 'amount') {
-        goalChip = `<span class="goal-chip">📊 ${todayProg}/${h.goal.target}${h.goal.unit ? ' ' + esc(h.goal.unit) : ''}</span>`;
+        goalChip = `<span class="goal-chip">${ICONS.chart} ${todayProg}/${h.goal.target}${h.goal.unit ? ' ' + esc(h.goal.unit) : ''}</span>`;
       }
     }
+    const flameColor = cur > 0 ? '#f97316' : 'var(--muted)';
     return `<article class="card" data-habit="${h.id}">
       <div class="card-head" data-card-head="${h.id}">
         <div class="card-info">
@@ -478,14 +478,14 @@ function renderPanel(tab) {
             ${h.detail ? `<span class="detail">${esc(h.detail)}</span>` : ''}
           </div>
           <div class="card-stats">
-            <span>🔗 Zincir: <b>${cur}</b> gün</span>
-            <span>🏆 En uzun: <b>${best}</b></span>
-            <span>📅 Bu ay: <b>${monthDone}/${dim}</b></span>
+            <span class="stat-pill"><span style="display:inline-grid;color:${flameColor}">${ICONS.flame}</span> <b>${cur}</b> gün</span>
+            <span class="stat-pill">${ICONS.trophy} <b>${best}</b></span>
+            <span class="stat-pill">${ICONS.calendar} <b>${monthDone}/${dim}</b></span>
             ${goalChip}
           </div>
         </div>
         <div class="card-actions">
-          ${cellHTML(h, now.getFullYear(), now.getMonth(), now.getDate(), 'today-btn', '<small>Bugün</small>')}
+          ${cellHTML(h, now.getFullYear(), now.getMonth(), now.getDate(), 'today-btn', `<small>Bugün</small>${now.getDate()}`)}
         </div>
       </div>
       <div class="chain" role="group" aria-label="${esc(h.name)} aylık zincir" style="--days: ${dim}">${cells}</div>
@@ -513,7 +513,7 @@ function renderPanel(tab) {
       </div>
       ${isCurrentMonth ? '' : '<button type="button" class="pill" data-month="today">Bu aya dön</button>'}
       <span class="spacer"></span>
-      ${habits.length > 1 || reorderMode ? `<button type="button" class="${reorderMode ? 'primary' : 'pill'}" data-reorder aria-pressed="${reorderMode}">${reorderMode ? '✓ Bitti' : '⇅ Sırala'}</button>` : ''}
+      ${habits.length > 1 || reorderMode ? `<button type="button" class="${reorderMode ? 'primary' : 'pill'}" data-reorder aria-pressed="${reorderMode}">${reorderMode ? '✓ Bitti' : `${ICONS.sort} Sırala`}</button>` : ''}
       ${reorderMode ? '' : '<button type="button" class="primary" data-add>＋ Madde ekle</button>'}
     </div>
     <div class="list ${reorderMode ? 'reordering' : ''}">${cards || '<p class="empty">Bu sekmede henüz madde yok. “Madde ekle” ile başla.</p>'}</div>`;
@@ -531,13 +531,15 @@ $('#topModeTabs')?.addEventListener('click', (e) => {
   render();
 });
 
-$('#profileBtn')?.addEventListener('click', () => {
+const toggleProfileAndSettings = () => {
   profileSavedMsg = false;
   profileOpen = !profileOpen;
   reorderMode = false;
   taskReorderMode = false;
   render();
-});
+};
+$('#profileBtn')?.addEventListener('click', toggleProfileAndSettings);
+$('#floatingGearBtn')?.addEventListener('click', toggleProfileAndSettings);
 
 $('#tabs').addEventListener('click', (e) => {
   const b = e.target.closest('[data-tab]');

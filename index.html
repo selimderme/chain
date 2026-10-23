@@ -17,9 +17,8 @@
         <button type="button" class="top-mode-btn active" data-section="rutin">Günlük Rutin</button>
         <button type="button" class="top-mode-btn" data-section="gorevler">Görevler <span class="top-mode-badge" id="tasksBadge" hidden>0</span></button>
       </div>
-      <button type="button" id="profileBtn" class="profile-circle-btn" aria-label="Profil sayfasını aç" title="Profil">👤</button>
+      <button type="button" id="profileBtn" class="profile-circle-btn" aria-label="Profil sayfasını aç" title="Profil"></button>
     </div>
-    <nav class="tabs" role="tablist" aria-label="Kategoriler" id="tabs"></nav>
   </header>
 
   <main id="panel" class="panel" role="tabpanel" aria-live="polite"></main>
@@ -31,6 +30,17 @@
     </p>
     <input type="file" id="importFile" accept="application/json" hidden>
   </footer>
+
+  <!-- Minimal Glassmorphic Yüzen Ayarlar Çarkı -->
+  <button type="button" id="floatingGearBtn" class="floating-gear-btn" aria-label="Ayarlar ve Profil" title="Ayarlar ve Profil">
+    <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+      <circle cx="12" cy="12" r="3"></circle>
+      <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path>
+    </svg>
+  </button>
+
+  <!-- Yarı Saydam (Glassmorphism) Alt Menü (Tab Bar) -->
+  <nav class="tabs" role="tablist" aria-label="Kategoriler" id="tabs"></nav>
 
   <!-- Basılı tutunca açılan renk menüsü -->
   <div id="menu" class="menu" popover="manual" role="menu" aria-label="İşaret rengi seç">

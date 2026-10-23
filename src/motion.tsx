@@ -608,14 +608,428 @@ export function AnimatedNumber({
   );
 }
 
-// ───────── Zincir simgesi: 3+ gün serisinde nabız atan 🔥 ─────────
+// ───────── Minimal ve Estetik Mikro-İkonlar (Micro-iconography) ─────────
+export type MicroIconName =
+  | 'flame'
+  | 'trophy'
+  | 'calendar'
+  | 'timer'
+  | 'repeat'
+  | 'chart'
+  | 'gear'
+  | 'user'
+  | 'sort';
+
+interface MicroIconProps {
+  name: MicroIconName;
+  color: string;
+  size?: number;
+}
+
+export function MicroIcon({ name, color, size = 13 }: MicroIconProps) {
+  if (name === 'flame') {
+    // Minimal modern alev ikonu (katmanlı damla formu)
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <View
+          style={{
+            width: size * 0.68,
+            height: size * 0.82,
+            backgroundColor: color,
+            borderTopLeftRadius: size * 0.5,
+            borderTopRightRadius: size * 0.14,
+            borderBottomLeftRadius: size * 0.42,
+            borderBottomRightRadius: size * 0.42,
+            transform: [{ rotate: '-12deg' }],
+            alignItems: 'center',
+            justifyContent: 'flex-end',
+            paddingBottom: size * 0.12,
+          }}
+        >
+          <View
+            style={{
+              width: size * 0.28,
+              height: size * 0.34,
+              borderRadius: size * 0.2,
+              backgroundColor: 'rgba(255,255,255,0.78)',
+            }}
+          />
+        </View>
+      </View>
+    );
+  }
+
+  if (name === 'trophy') {
+    // Minimal modern kupa ikonu
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <View
+          style={{
+            width: size * 0.64,
+            height: size * 0.48,
+            borderWidth: 1.5,
+            borderColor: color,
+            borderBottomLeftRadius: size * 0.32,
+            borderBottomRightRadius: size * 0.32,
+            borderTopLeftRadius: 2,
+            borderTopRightRadius: 2,
+          }}
+        />
+        <View
+          style={{
+            width: 1.5,
+            height: size * 0.2,
+            backgroundColor: color,
+          }}
+        />
+        <View
+          style={{
+            width: size * 0.48,
+            height: 1.6,
+            borderRadius: 1,
+            backgroundColor: color,
+          }}
+        />
+      </View>
+    );
+  }
+
+  if (name === 'calendar') {
+    // Minimal modern takvim ikonu
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <View
+          style={{
+            width: size * 0.82,
+            height: size * 0.78,
+            borderRadius: 3,
+            borderWidth: 1.4,
+            borderColor: color,
+            overflow: 'hidden',
+          }}
+        >
+          <View
+            style={{
+              height: size * 0.22,
+              backgroundColor: color,
+              width: '100%',
+            }}
+          />
+          <View
+            style={{
+              flex: 1,
+              flexDirection: 'row',
+              alignItems: 'center',
+              justifyContent: 'space-evenly',
+            }}
+          >
+            <View
+              style={{
+                width: 2,
+                height: 2,
+                borderRadius: 1,
+                backgroundColor: color,
+              }}
+            />
+            <View
+              style={{
+                width: 2,
+                height: 2,
+                borderRadius: 1,
+                backgroundColor: color,
+              }}
+            />
+          </View>
+        </View>
+      </View>
+    );
+  }
+
+  if (name === 'timer') {
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          borderRadius: size / 2,
+          borderWidth: 1.5,
+          borderColor: color,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <View
+          style={{
+            width: 1.4,
+            height: size * 0.28,
+            backgroundColor: color,
+            marginBottom: size * 0.08,
+          }}
+        />
+      </View>
+    );
+  }
+
+  if (name === 'repeat') {
+    return (
+      <View
+        style={{
+          width: size,
+          height: size * 0.72,
+          borderRadius: size * 0.36,
+          borderWidth: 1.5,
+          borderColor: color,
+        }}
+      />
+    );
+  }
+
+  if (name === 'chart') {
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          flexDirection: 'row',
+          alignItems: 'flex-end',
+          justifyContent: 'center',
+          gap: 1.8,
+          paddingBottom: 1,
+        }}
+      >
+        <View
+          style={{
+            width: 2.2,
+            height: size * 0.38,
+            borderRadius: 1,
+            backgroundColor: color,
+            opacity: 0.65,
+          }}
+        />
+        <View
+          style={{
+            width: 2.2,
+            height: size * 0.62,
+            borderRadius: 1,
+            backgroundColor: color,
+            opacity: 0.85,
+          }}
+        />
+        <View
+          style={{
+            width: 2.2,
+            height: size * 0.86,
+            borderRadius: 1,
+            backgroundColor: color,
+          }}
+        />
+      </View>
+    );
+  }
+
+  if (name === 'gear') {
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <View
+          style={{
+            width: size * 0.78,
+            height: size * 0.78,
+            borderRadius: size * 0.39,
+            borderWidth: 1.8,
+            borderColor: color,
+            borderStyle: 'dashed',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <View
+            style={{
+              width: size * 0.3,
+              height: size * 0.3,
+              borderRadius: size * 0.15,
+              borderWidth: 1.5,
+              borderColor: color,
+            }}
+          />
+        </View>
+      </View>
+    );
+  }
+
+  if (name === 'user') {
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          alignItems: 'center',
+          justifyContent: 'center',
+          gap: 1.5,
+        }}
+      >
+        <View
+          style={{
+            width: size * 0.42,
+            height: size * 0.42,
+            borderRadius: size * 0.21,
+            borderWidth: 1.6,
+            borderColor: color,
+          }}
+        />
+        <View
+          style={{
+            width: size * 0.74,
+            height: size * 0.32,
+            borderTopLeftRadius: size * 0.36,
+            borderTopRightRadius: size * 0.36,
+            borderWidth: 1.6,
+            borderBottomWidth: 0,
+            borderColor: color,
+          }}
+        />
+      </View>
+    );
+  }
+
+  // 'sort'
+  return (
+    <View
+      style={{
+        width: size,
+        height: size,
+        alignItems: 'center',
+        justifyContent: 'center',
+        gap: 2.2,
+      }}
+    >
+      <View
+        style={{
+          width: size * 0.82,
+          height: 1.6,
+          borderRadius: 1,
+          backgroundColor: color,
+        }}
+      />
+      <View
+        style={{
+          width: size * 0.58,
+          height: 1.6,
+          borderRadius: 1,
+          backgroundColor: color,
+        }}
+      />
+      <View
+        style={{
+          width: size * 0.36,
+          height: 1.6,
+          borderRadius: 1,
+          backgroundColor: color,
+        }}
+      />
+    </View>
+  );
+}
+
+// ───────── Yumuşak Gradyan Katmanı (Soft Gradient Sheen) ─────────
+export function SoftGradientOverlay({
+  startColor = 'rgba(255,255,255,0.18)',
+  endColor = 'rgba(0,0,0,0.12)',
+  borderRadius = 20,
+}: {
+  startColor?: string;
+  endColor?: string;
+  borderRadius?: number;
+}) {
+  return (
+    <View
+      pointerEvents="none"
+      style={[
+        StyleSheet.absoluteFill,
+        {
+          borderRadius,
+          overflow: 'hidden',
+        },
+      ]}
+    >
+      <View
+        style={{
+          position: 'absolute',
+          top: -30,
+          left: -20,
+          width: '75%',
+          height: '85%',
+          borderRadius: 999,
+          backgroundColor: startColor,
+          opacity: 0.55,
+        }}
+      />
+      <View
+        style={{
+          position: 'absolute',
+          bottom: -35,
+          right: -20,
+          width: '70%',
+          height: '80%',
+          borderRadius: 999,
+          backgroundColor: endColor,
+          opacity: 0.45,
+        }}
+      />
+      <View
+        style={{
+          position: 'absolute',
+          top: 0,
+          left: 12,
+          right: 12,
+          height: 1,
+          backgroundColor: 'rgba(255,255,255,0.28)',
+        }}
+      />
+    </View>
+  );
+}
+
+// ───────── Zincir simgesi: 3+ gün serisinde nabız atan minimal alev ─────────
 interface StreakIconProps {
   streak: number;
   threshold?: number;
+  color?: string;
   style?: StyleProp<TextStyle>;
 }
 
-export function StreakIcon({ streak, threshold = 3, style }: StreakIconProps) {
+export function StreakIcon({
+  streak,
+  threshold = 3,
+  color = '#F26B27',
+}: StreakIconProps) {
   const v = useRef(new Animated.Value(0)).current;
   const hot = streak >= threshold;
 
@@ -628,13 +1042,13 @@ export function StreakIcon({ streak, threshold = 3, style }: StreakIconProps) {
       Animated.sequence([
         Animated.timing(v, {
           toValue: 1,
-          duration: 650,
+          duration: 750,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: USE_NATIVE,
         }),
         Animated.timing(v, {
           toValue: 0,
-          duration: 650,
+          duration: 750,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: USE_NATIVE,
         }),
@@ -646,29 +1060,24 @@ export function StreakIcon({ streak, threshold = 3, style }: StreakIconProps) {
   }, [hot]);
 
   return (
-    <Animated.Text
-      style={[
-        style,
-        {
-          transform: [
-            {
-              scale: v.interpolate({
-                inputRange: [0, 1],
-                outputRange: [1, 1.22],
-              }),
-            },
-            {
-              rotate: v.interpolate({
-                inputRange: [0, 1],
-                outputRange: ['-5deg', '6deg'],
-              }),
-            },
-          ],
-        },
-      ]}
+    <Animated.View
+      style={{
+        transform: [
+          {
+            scale: v.interpolate({
+              inputRange: [0, 1],
+              outputRange: [1, 1.18],
+            }),
+          },
+        ],
+      }}
     >
-      {hot ? '🔥' : '🔗'}
-    </Animated.Text>
+      <MicroIcon
+        name="flame"
+        size={13}
+        color={streak > 0 ? color : 'rgba(148,163,184,0.7)'}
+      />
+    </Animated.View>
   );
 }
 
