@@ -620,6 +620,95 @@ button { cursor: pointer; }
   background: var(--green);
   box-shadow: 0 4px 10px -2px rgba(16, 185, 129, .5);
 }
+.cell.s-g.in-chain {
+  border-color: rgba(167, 243, 208, .78);
+  box-shadow: 0 4px 12px -1px rgba(16, 185, 129, .62), 0 0 0 1px rgba(52, 211, 153, .32);
+}
+
+/* 3B Metalik Zincir Halkaları + Akışkan Lazer Dalgası */
+.chain-link-3d {
+  position: absolute;
+  right: -11.5px;
+  top: 50%;
+  width: 18px;
+  height: 14px;
+  translate: 0 -50%;
+  pointer-events: none;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  filter: drop-shadow(0 1px 4px rgba(16, 185, 129, .65));
+  animation: chain-clasp-pop .38s cubic-bezier(.22, 1.35, .36, 1) both;
+}
+.chain-laser-track {
+  position: absolute;
+  width: 14px;
+  height: 4px;
+  border-radius: 99px;
+  background: #064e3b;
+  border: 1px solid rgba(52, 211, 153, .75);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+}
+.chain-laser-track::before {
+  content: "";
+  position: absolute;
+  inset: 1px 0;
+  background: linear-gradient(90deg, #10b981, #a7f3d0, #10b981);
+  opacity: .9;
+}
+.chain-laser-wave {
+  position: relative;
+  width: 7px;
+  height: 6px;
+  border-radius: 99px;
+  background: #ffffff;
+  box-shadow: 0 0 6px 1px #6ee7b7;
+  transform: skewX(-24deg);
+  animation: chain-laser-flow 1.6s ease-in-out infinite;
+  animation-delay: calc((var(--step, 1) * 120ms) % 1200ms);
+}
+.chain-rings-svg {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.chain-rings-svg .ring-left {
+  animation: ring-snap-left .4s cubic-bezier(.2, 1.3, .35, 1) both;
+}
+.chain-rings-svg .ring-right {
+  animation: ring-snap-right .4s cubic-bezier(.2, 1.3, .35, 1) both;
+}
+.chain-rings-svg .ring-core {
+  transform-origin: 14px 10px;
+  animation: ring-core-pulse 1.5s ease-in-out infinite;
+  animation-delay: calc((var(--step, 1) * 120ms) % 1200ms);
+}
+@keyframes chain-clasp-pop {
+  0% { opacity: 0; scale: .6; }
+  70% { opacity: 1; scale: 1.1; }
+  100% { opacity: 1; scale: 1; }
+}
+@keyframes ring-snap-left {
+  0% { transform: translateX(-5px) rotate(-12deg); }
+  100% { transform: translateX(0) rotate(0deg); }
+}
+@keyframes ring-snap-right {
+  0% { transform: translateX(5px) rotate(12deg); }
+  100% { transform: translateX(0) rotate(0deg); }
+}
+@keyframes chain-laser-flow {
+  0% { translate: -10px 0; opacity: 0; }
+  25% { opacity: 1; }
+  75% { opacity: 1; }
+  100% { translate: 16px 0; opacity: 0; }
+}
+@keyframes ring-core-pulse {
+  0%, 100% { transform: scale(.9); opacity: .85; }
+  50% { transform: scale(1.25); opacity: 1; }
+}
 .cell.s-b {
   background: var(--blue);
   box-shadow: 0 4px 10px -2px rgba(59, 130, 246, .5);

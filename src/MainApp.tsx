@@ -6,6 +6,7 @@ import {
   AppState,
   Easing,
   KeyboardAvoidingView,
+  LogBox,
   Modal,
   Platform,
   Pressable,
@@ -64,21 +65,30 @@ import {
 import { loadAppState, saveAppState, seedState } from './storage';
 import AuthScreen from './AuthScreen';
 import {
+  ActivityHeatmap,
   animateLayout,
   AnimatedCheckCircle,
   AnimatedNumber,
   AnimatedProgressBar,
+  CategoryAtmosphere,
+  ChainLink,
   ConfettiBurst,
   FadeSlideIn,
+  FireworksCelebration,
   FloatingEmoji,
+  LiquidWaveGauge,
   MarkPop,
   MicroIcon,
   MicroIconName,
   PopOnChange,
   PressableScale,
+  ProgressRing,
   SheetPressable,
   SoftGradientOverlay,
+  SpringDragList,
   StreakIcon,
+  SwipeableTaskRow,
+  TaskRowMotion,
   ThemeCrossfade,
   withAlpha,
 } from './motion';
@@ -119,6 +129,10 @@ const TASK_NOTIFICATION_CHANNEL_ID = 'gorev-hatirlatici';
 
 if (Platform.OS !== 'web') {
   try {
+    LogBox.ignoreLogs([
+      'expo-notifications: Android Push notifications',
+      '`expo-notifications` functionality is not fully supported in Expo Go',
+    ]);
     Notifications.setNotificationHandler({
       handleNotification: async () => ({
         shouldShowBanner: true,
@@ -375,6 +389,7 @@ interface HabitWeekScrollProps {
   rowViewportWidth: number;
   cellStep: number;
   scrollKey: string;
+  onTouchChange?: (touching: boolean) => void;
   children: React.ReactNode;
 }
 
@@ -383,6 +398,7 @@ function HabitWeekScroll({
   rowViewportWidth,
   cellStep,
   scrollKey,
+  onTouchChange,
   children,
 }: HabitWeekScrollProps) {
   const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
@@ -404,6 +420,12 @@ function HabitWeekScroll({
       snapToInterval={cellStep}
       snapToAlignment="start"
       contentOffset={{ x: initialScrollX, y: 0 }}
+      onTouchStart={() => onTouchChange?.(true)}
+      onTouchEnd={() => onTouchChange?.(false)}
+      onTouchCancel={() => onTouchChange?.(false)}
+      onScrollBeginDrag={() => onTouchChange?.(true)}
+      onScrollEndDrag={() => onTouchChange?.(false)}
+      onMomentumScrollEnd={() => onTouchChange?.(false)}
       onLayout={() => {
         scrollRef.current?.scrollTo({
           x: initialScrollX,
@@ -411,8 +433,14 @@ function HabitWeekScroll({
           animated: false,
         });
       }}
-      style={[styles.chainScroll, { width: rowViewportWidth }]}
-      contentContainerStyle={styles.chainRow}
+      style={[
+        styles.chainScroll,
+        { width: rowViewportWidth + 20, marginHorizontal: -10 },
+      ]}
+      contentContainerStyle={[
+        styles.chainRow,
+        { paddingHorizontal: 10, paddingVertical: 12 },
+      ]}
     >
       {children}
     </ScrollView>
@@ -589,6 +617,7 @@ function GunlukPlanScreen() {
   });
 
   const [reorderMode, setReorderMode] = useState(false);
+  const [monthlyViewMode, setMonthlyViewMode] = useState(false);
   const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
 
   // Ekle / Düzenle Modal Durumu (Container'a basılı tutunca açılır)
@@ -609,6 +638,7 @@ function GunlukPlanScreen() {
   const [actionHabitId, setActionHabitId] = useState<string | null>(null);
   const [timerRunning, setTimerRunning] = useState(false);
   const [timerRemaining, setTimerRemaining] = useState(0);
+  const [timerFinishKey, setTimerFinishKey] = useState(0);
   const [customAmountStr, setCustomAmountStr] = useState('');
 
   // Profil Sayfası Durumu
@@ -635,6 +665,13 @@ function GunlukPlanScreen() {
   const [quickTaskTitle, setQuickTaskTitle] = useState('');
   const [completedExpanded, setCompletedExpanded] = useState(true);
   const [taskReorderMode, setTaskReorderMode] = useState(false);
+  const mainScrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const tasksScrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const ignoreHabitSwipeRef = useRef(false);
+  const setListGestureActive = (active: boolean) => {
+    (mainScrollRef.current as any)?.setNativeProps?.({ scrollEnabled: !active });
+    (tasksScrollRef.current as any)?.setNativeProps?.({ scrollEnabled: !active });
+  };
   const [taskModalOpen, setTaskModalOpen] = useState(false);
   const [editingTask, setEditingTask] = useState<TaskItem | null>(null);
   const [taskTitle, setTaskTitle] = useState('');
@@ -664,10 +701,22 @@ function GunlukPlanScreen() {
   const [pickerOuterScrollEnabled, setPickerOuterScrollEnabled] = useState(true);
   const firedWebNotifsRef = useRef<Set<string>>(new Set());
   const skipNextAutoCloudSyncRef = useRef(false);
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const stateRef = useRef<AppDataState>(state);
   useEffect(() => {
     stateRef.current = state;
   }, [state]);
+
+  const scheduleSaveAppState = (nextState: AppDataState) => {
+    stateRef.current = nextState;
+    if (saveTimerRef.current) {
+      clearTimeout(saveTimerRef.current);
+    }
+    saveTimerRef.current = setTimeout(() => {
+      saveTimerRef.current = null;
+      saveAppState(stateRef.current);
+    }, 150);
+  };
 
   // Hero emoji animasyonu
   const heroAnim = useRef(new Animated.Value(0)).current;
@@ -877,7 +926,7 @@ function GunlukPlanScreen() {
         ...updated,
         updatedAt: Date.now(),
       };
-      saveAppState(next);
+      scheduleSaveAppState(next);
       return next;
     });
   };
@@ -1091,6 +1140,13 @@ function GunlukPlanScreen() {
   ) => {
     const clamped = Math.max(0, Math.round(newVal * 100) / 100);
     const target = habit.goal?.target || 0;
+    const prevVal = state.progress?.[habit.id]?.[dateStr] || 0;
+    if (target > 0 && prevVal < target && clamped >= target) {
+      setTimerFinishKey((k) => k + 1);
+      Haptics.notificationAsync(
+        Haptics.NotificationFeedbackType.Success
+      ).catch(() => {});
+    }
     updateAndSave((prev) => {
       const nextProgress = { ...(prev.progress || {}) };
       const habitProg = { ...(nextProgress[habit.id] || {}) };
@@ -1143,6 +1199,7 @@ function GunlukPlanScreen() {
       setTimerRemaining((prev) => {
         if (prev <= 1) {
           setTimerRunning(false);
+          setTimerFinishKey((k) => k + 1);
           Haptics.notificationAsync(
             Haptics.NotificationFeedbackType.Success
           ).catch(() => {});
@@ -1195,23 +1252,43 @@ function GunlukPlanScreen() {
   };
 
   const handleSelectSection = (sec: MainSection) => {
+    if (!profileOpen && (state.section || 'rutin') === sec) return;
     Haptics.selectionAsync().catch(() => {});
     if (profileOpen) {
       setProfileOpen(false);
     }
-    setReorderMode(false);
-    setTaskReorderMode(false);
-    updateAndSave((prev) => ({ ...prev, section: sec }));
+    if (reorderMode) setReorderMode(false);
+    if (taskReorderMode) setTaskReorderMode(false);
+    setState((prev) => {
+      if (prev.section === sec) return prev;
+      const next = { ...prev, section: sec };
+      scheduleSaveAppState(next);
+      return next;
+    });
   };
 
   const handleSelectTab = (tabId: TabId) => {
+    if (
+      !profileOpen &&
+      (state.section || 'rutin') === 'rutin' &&
+      state.tab === tabId
+    ) {
+      return;
+    }
     Haptics.selectionAsync().catch(() => {});
     if (profileOpen) {
       setProfileOpen(false);
     }
-    setReorderMode(false);
-    setTaskReorderMode(false);
-    updateAndSave((prev) => ({ ...prev, section: 'rutin', tab: tabId }));
+    if (reorderMode) setReorderMode(false);
+    if (taskReorderMode) setTaskReorderMode(false);
+    setState((prev) => {
+      if ((prev.section || 'rutin') === 'rutin' && prev.tab === tabId) {
+        return prev;
+      }
+      const next: AppDataState = { ...prev, section: 'rutin', tab: tabId };
+      scheduleSaveAppState(next);
+      return next;
+    });
   };
 
   const handleToggleProfile = () => {
@@ -1261,7 +1338,6 @@ function GunlukPlanScreen() {
 
   const moveHabit = (habitId: string, direction: -1 | 1) => {
     Haptics.selectionAsync().catch(() => {});
-    animateLayout();
     updateAndSave((prev) => {
       const tabHabits = prev.habits.filter((h) => h.tab === prev.tab);
       const ids = tabHabits.map((h) => h.id);
@@ -1269,6 +1345,37 @@ function GunlukPlanScreen() {
       const j = i + direction;
       if (i < 0 || j < 0 || j >= ids.length) return prev;
       [ids[i], ids[j]] = [ids[j], ids[i]];
+
+      const slots: number[] = [];
+      prev.habits.forEach((h, idx) => {
+        if (h.tab === prev.tab) slots.push(idx);
+      });
+      const byId = new Map(prev.habits.map((h) => [h.id, h]));
+      const nextHabits = [...prev.habits];
+      ids.forEach((id, k) => {
+        const item = byId.get(id);
+        if (item) nextHabits[slots[k]] = item;
+      });
+      return { ...prev, habits: nextHabits };
+    });
+  };
+
+  const reorderHabit = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    updateAndSave((prev) => {
+      const tabHabits = prev.habits.filter((h) => h.tab === prev.tab);
+      const ids = tabHabits.map((h) => h.id);
+      if (
+        fromIndex < 0 ||
+        fromIndex >= ids.length ||
+        toIndex < 0 ||
+        toIndex >= ids.length
+      ) {
+        return prev;
+      }
+      const [movedId] = ids.splice(fromIndex, 1);
+      ids.splice(toIndex, 0, movedId);
 
       const slots: number[] = [];
       prev.habits.forEach((h, idx) => {
@@ -1394,6 +1501,8 @@ function GunlukPlanScreen() {
         target: val,
         unit: goalUnit.trim() || 'birim',
       };
+    } else {
+      finalGoal = { type: 'none', target: 0 };
     }
 
     // Eğer yeni bir alt başlık yazılıp "+ Ekle"ye basılmadıysa onu da dahil et
@@ -1729,7 +1838,6 @@ function GunlukPlanScreen() {
 
   const moveTask = (taskId: string, direction: -1 | 1) => {
     Haptics.selectionAsync().catch(() => {});
-    animateLayout();
     updateAndSave((prev) => {
       const allTasks = prev.tasks || [];
       const activeIds = allTasks.filter((t) => !t.done).map((t) => t.id);
@@ -1741,6 +1849,39 @@ function GunlukPlanScreen() {
       const slots: number[] = [];
       allTasks.forEach((t, idx) => {
         if (!t.done) slots.push(idx);
+      });
+      const byId = new Map(allTasks.map((t) => [t.id, t]));
+      const nextTasks = [...allTasks];
+      activeIds.forEach((id, k) => {
+        const item = byId.get(id);
+        if (item) nextTasks[slots[k]] = item;
+      });
+      return { ...prev, tasks: nextTasks };
+    });
+  };
+
+  const reorderTask = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
+    updateAndSave((prev) => {
+      const allTasks = prev.tasks || [];
+      const isMatch = (t: TaskItem) =>
+        !t.done && (taskFilter === 'starred' ? !!t.starred : true);
+      const activeIds = allTasks.filter(isMatch).map((t) => t.id);
+      if (
+        fromIndex < 0 ||
+        fromIndex >= activeIds.length ||
+        toIndex < 0 ||
+        toIndex >= activeIds.length
+      ) {
+        return prev;
+      }
+      const [movedId] = activeIds.splice(fromIndex, 1);
+      activeIds.splice(toIndex, 0, movedId);
+
+      const slots: number[] = [];
+      allTasks.forEach((t, idx) => {
+        if (isMatch(t)) slots.push(idx);
       });
       const byId = new Map(allTasks.map((t) => [t.id, t]));
       const nextTasks = [...allTasks];
@@ -2056,6 +2197,70 @@ function GunlukPlanScreen() {
     };
   };
 
+  // Profil: son 12 haftanın günlük tamamlanma ısı haritası
+  const heatmapWeeks = useMemo(() => {
+    const total = state.habits.length;
+    const end = new Date(today.y, today.m, today.d);
+    const dayFromMonday = (end.getDay() + 6) % 7;
+    end.setDate(end.getDate() + (6 - dayFromMonday));
+    const start = new Date(end);
+    start.setDate(end.getDate() - (12 * 7 - 1));
+
+    return Array.from({ length: 12 }, (_, weekIdx) =>
+      Array.from({ length: 7 }, (_, dayIdx) => {
+        const date = new Date(start);
+        date.setDate(start.getDate() + weekIdx * 7 + dayIdx);
+        const key = keyOf(date);
+        let done = 0;
+        for (const habit of state.habits) {
+          if (state.marks[habit.id]?.[key] === 'g') done++;
+        }
+        return {
+          key,
+          ratio: total > 0 ? done / total : 0,
+          future: key > today.key,
+          today: key === today.key,
+        };
+      })
+    );
+  }, [state.habits, state.marks, today.y, today.m, today.d, today.key]);
+
+  const heatmapPerfectDays = useMemo(
+    () => heatmapWeeks.flat().filter((d) => !d.future && d.ratio >= 1).length,
+    [heatmapWeeks]
+  );
+  const heatmapActiveDays = useMemo(
+    () => heatmapWeeks.flat().filter((d) => !d.future && d.ratio > 0).length,
+    [heatmapWeeks]
+  );
+
+  const daysArray = useMemo(
+    () => Array.from({ length: dim }, (_, idx) => idx + 1),
+    [dim]
+  );
+  const allDoneToday = useMemo(
+    () =>
+      state.habits.filter((h) => state.marks[h.id]?.[today.key] === 'g').length,
+    [state.habits, state.marks, today.key]
+  );
+  const totalMarkedDays = useMemo(
+    () =>
+      Object.values(state.marks).reduce(
+        (acc, m) => acc + Object.keys(m || {}).length,
+        0
+      ),
+    [state.marks]
+  );
+  const maxBestStreak = useMemo(
+    () =>
+      state.habits.reduce(
+        (max, h) =>
+          Math.max(max, calculateStreaks(state.marks[h.id], today.key).best),
+        0
+      ),
+    [state.habits, state.marks, today.key]
+  );
+
   if (!loaded) {
     return (
       <View
@@ -2094,7 +2299,6 @@ function GunlukPlanScreen() {
       : activeTasksAll;
   const completedTasks = allTasks.filter((t) => t.done);
 
-  const daysArray = Array.from({ length: dim }, (_, idx) => idx + 1);
   const currentMenuMark = menuTarget
     ? getMark(menuTarget.habitId, menuTarget.dateStr)
     : '';
@@ -2106,18 +2310,6 @@ function GunlukPlanScreen() {
     .filter(Boolean)
     .join(' ')
     .trim();
-  const allDoneToday = state.habits.filter(
-    (h) => getMark(h.id, today.key) === 'g'
-  ).length;
-  const totalMarkedDays = Object.values(state.marks).reduce(
-    (acc, m) => acc + Object.keys(m || {}).length,
-    0
-  );
-  const maxBestStreak = state.habits.reduce(
-    (max, h) =>
-      Math.max(max, calculateStreaks(state.marks[h.id], today.key).best),
-    0
-  );
 
   return (
     <SafeAreaView
@@ -2125,6 +2317,12 @@ function GunlukPlanScreen() {
       style={[styles.safeArea, { backgroundColor: theme.bg }]}
     >
       <StatusBar style={theme.isDark ? 'light' : 'dark'} />
+
+      {/* Kategoriye Göre Dinamik 3D Partikül Atmosferi (Yüksek Performanslı Native Driver) */}
+      <CategoryAtmosphere
+        category={isTasksMode ? 'gorevler' : state.tab}
+        isDark={theme.isDark}
+      />
 
       {/* Üst Başlık (Buzlu Cam / Glassmorphism Segmented Bar & Minimal Kontroller) */}
       <View
@@ -2393,11 +2591,10 @@ function GunlukPlanScreen() {
                     },
                   ]}
                 >
-                  <Text
+                  <AnimatedNumber
+                    value={state.habits.length}
                     style={[styles.profileStatVal, { color: theme.text }]}
-                  >
-                    {state.habits.length}
-                  </Text>
+                  />
                   <Text
                     style={[styles.profileStatLbl, { color: theme.muted }]}
                   >
@@ -2415,14 +2612,14 @@ function GunlukPlanScreen() {
                     },
                   ]}
                 >
-                  <Text
+                  <AnimatedNumber
+                    value={allDoneToday}
+                    suffix={`/${state.habits.length}`}
                     style={[
                       styles.profileStatVal,
                       { color: MARK_COLORS.green },
                     ]}
-                  >
-                    {allDoneToday}/{state.habits.length}
-                  </Text>
+                  />
                   <Text
                     style={[styles.profileStatLbl, { color: theme.muted }]}
                   >
@@ -2440,17 +2637,100 @@ function GunlukPlanScreen() {
                     },
                   ]}
                 >
-                  <Text
+                  <AnimatedNumber
+                    value={maxBestStreak}
+                    suffix=" gün"
                     style={[styles.profileStatVal, { color: theme.text }]}
-                  >
-                    {maxBestStreak} gün
-                  </Text>
+                  />
                   <Text
                     style={[styles.profileStatLbl, { color: theme.muted }]}
                   >
                     En Uzun Zincir
                   </Text>
                 </View>
+              </View>
+            </View>
+
+            {/* Son 12 Hafta Aktivite Isı Haritası */}
+            <View
+              style={[
+                styles.card,
+                styles.profileSectionCard,
+                {
+                  backgroundColor: theme.surface,
+                  borderRadius: theme.radius,
+                  borderColor: theme.cardBorderColor,
+                  borderWidth: theme.cardBorderWidth,
+                },
+              ]}
+            >
+              <View style={styles.heatmapHeaderRow}>
+                <Text
+                  style={[
+                    styles.profileSectionTitle,
+                    { color: theme.text, marginBottom: 0 },
+                  ]}
+                >
+                  🔥 Son 12 Hafta
+                </Text>
+                <Text
+                  style={[styles.heatmapSummary, { color: theme.muted }]}
+                >
+                  {heatmapPerfectDays} mükemmel gün
+                </Text>
+              </View>
+              <Text
+                style={[
+                  styles.profileSectionDesc,
+                  { color: theme.muted, marginTop: 6, marginBottom: 12 },
+                ]}
+              >
+                Tüm maddeleri tamamladığın günler daha koyu yeşil görünür.
+              </Text>
+              <ActivityHeatmap
+                weeks={heatmapWeeks}
+                color={MARK_COLORS.green}
+                trackColor={
+                  theme.isDark
+                    ? 'rgba(255,255,255,0.07)'
+                    : 'rgba(0,0,0,0.055)'
+                }
+                todayColor={theme.accent}
+                cellGap={4}
+                cellRadius={3}
+                accessibilityLabel={`Son 12 haftada ${heatmapActiveDays} aktif gün ve ${heatmapPerfectDays} mükemmel gün`}
+              />
+              <View style={styles.heatmapLegendRow}>
+                <Text
+                  style={[styles.heatmapLegendText, { color: theme.muted }]}
+                >
+                  Az
+                </Text>
+                {[0.2, 0.45, 0.7, 1].map((v) => (
+                  <View
+                    key={v}
+                    style={[
+                      styles.heatmapLegendCell,
+                      {
+                        backgroundColor: withAlpha(
+                          MARK_COLORS.green,
+                          0.22 + v * 0.78
+                        ),
+                      },
+                    ]}
+                  />
+                ))}
+                <Text
+                  style={[styles.heatmapLegendText, { color: theme.muted }]}
+                >
+                  Çok
+                </Text>
+                <View style={{ flex: 1 }} />
+                <Text
+                  style={[styles.heatmapLegendText, { color: theme.muted }]}
+                >
+                  {heatmapActiveDays}/84 gün
+                </Text>
               </View>
             </View>
 
@@ -2989,6 +3269,7 @@ function GunlukPlanScreen() {
           style={{ flex: 1 }}
         >
           <ScrollView
+            ref={tasksScrollRef}
             style={styles.mainScroll}
             contentContainerStyle={styles.mainContent}
             showsVerticalScrollIndicator={false}
@@ -3293,118 +3574,59 @@ function GunlukPlanScreen() {
                 </Text>
               </View>
             ) : (
-              <View style={styles.cardsList}>
-                {displayedActiveTasks.map((task, idx) => {
-                  if (taskReorderMode) {
-                    return (
-                      <View
-                        key={task.id}
-                        style={[
-                          styles.card,
-                          styles.compactCard,
-                          {
-                            backgroundColor: theme.surface,
-                            borderRadius: theme.radius,
-                            borderColor: theme.cardBorderColor,
-                            borderWidth: theme.cardBorderWidth,
-                            borderLeftWidth: theme.leftAccentBar
-                              ? 6
-                              : theme.cardBorderWidth,
-                            borderLeftColor:
-                              theme.leftAccentBar || theme.cardBorderColor,
-                          },
-                        ]}
-                      >
-                        <View
-                          style={[
-                            styles.dragHandleBadge,
-                            {
-                              backgroundColor: theme.isDark
-                                ? 'rgba(255,255,255,0.08)'
-                                : 'rgba(0,0,0,0.06)',
-                            },
-                          ]}
-                        >
-                          <Text style={{ color: theme.muted, fontSize: 18 }}>
-                            ⠿
-                          </Text>
-                        </View>
-                        <View style={styles.compactInfo}>
-                          <Text
-                            style={[
-                              styles.cardTitle,
-                              {
-                                color: theme.text,
-                                fontStyle: theme.headItalic
-                                  ? 'italic'
-                                  : 'normal',
-                              },
-                            ]}
-                          >
-                            {task.title}
-                          </Text>
-                          {!!task.detail && (
-                            <Text
-                              style={[
-                                styles.cardDetail,
-                                { color: theme.muted },
-                              ]}
-                            >
-                              {task.detail}
-                            </Text>
-                          )}
-                        </View>
-                        <TouchableOpacity
-                          disabled={idx === 0}
-                          onPress={() => moveTask(task.id, -1)}
-                          style={[
-                            styles.iconBtn,
-                            {
-                              backgroundColor: theme.surface,
-                              borderColor: theme.isDark
-                                ? 'rgba(255,255,255,0.18)'
-                                : 'rgba(0,0,0,0.15)',
-                              opacity: idx === 0 ? 0.3 : 1,
-                            },
-                          ]}
-                        >
-                          <Text style={{ color: theme.text, fontSize: 13 }}>
-                            ▲
-                          </Text>
-                        </TouchableOpacity>
-                        <TouchableOpacity
-                          disabled={idx === displayedActiveTasks.length - 1}
-                          onPress={() => moveTask(task.id, 1)}
-                          style={[
-                            styles.iconBtn,
-                            {
-                              backgroundColor: theme.surface,
-                              borderColor: theme.isDark
-                                ? 'rgba(255,255,255,0.18)'
-                                : 'rgba(0,0,0,0.15)',
-                              opacity:
-                                idx === displayedActiveTasks.length - 1
-                                  ? 0.3
-                                  : 1,
-                            },
-                          ]}
-                        >
-                          <Text style={{ color: theme.text, fontSize: 13 }}>
-                            ▼
-                          </Text>
-                        </TouchableOpacity>
-                      </View>
-                    );
-                  }
-
+              <SpringDragList
+                items={displayedActiveTasks}
+                keyExtractor={(t) => t.id}
+                onReorder={reorderTask}
+                onDragActiveChange={setListGestureActive}
+                onLongPressNoDrag={(t) => openTaskModal(t)}
+                onStartHaptic={() => {
+                  Haptics.impactAsync(
+                    Haptics.ImpactFeedbackStyle.Medium
+                  ).catch(() => {});
+                }}
+                onStepHaptic={() => {
+                  Haptics.selectionAsync().catch(() => {});
+                }}
+                accentColor={theme.accent}
+                borderRadius={theme.radius}
+                style={styles.cardsList}
+                renderItem={(task, idx, dragControls) => {
                   const subtasks = task.subtasks || [];
                   const isCompleting = completingTaskIds.includes(task.id);
                   return (
-                    <FadeSlideIn key={task.id} index={idx}>
+                    <FadeSlideIn index={idx}>
+                    <SwipeableTaskRow
+                      disabled={taskReorderMode}
+                      borderRadius={theme.radius}
+                      rightLabel="Tamamla"
+                      leftLabel="Sil"
+                      rightColor={MARK_COLORS.green}
+                      leftColor={MARK_COLORS.red}
+                      onSwipeActiveChange={setListGestureActive}
+                      onThresholdHaptic={() => {
+                        Haptics.impactAsync(
+                          Haptics.ImpactFeedbackStyle.Light
+                        ).catch(() => {});
+                      }}
+                      onSwipeRight={() => {
+                        Haptics.notificationAsync(
+                          Haptics.NotificationFeedbackType.Success
+                        ).catch(() => {});
+                        handleToggleTaskDone(task.id);
+                      }}
+                      onSwipeLeft={() => {
+                        Haptics.notificationAsync(
+                          Haptics.NotificationFeedbackType.Warning
+                        ).catch(() => {});
+                        handleDeleteSingleTask(task.id);
+                      }}
+                    >
+                    <TaskRowMotion completing={isCompleting}>
                     <View
                       style={[
                         styles.card,
-                        styles.taskCard,
+                        taskReorderMode ? styles.compactCard : styles.taskCard,
                         {
                           backgroundColor: theme.surface,
                           borderRadius: theme.radius,
@@ -3415,10 +3637,97 @@ function GunlukPlanScreen() {
                             : theme.cardBorderWidth,
                           borderLeftColor:
                             theme.leftAccentBar || theme.cardBorderColor,
-                          opacity: isCompleting ? 0.7 : 1,
                         },
                       ]}
                     >
+                      {taskReorderMode && (
+                        <>
+                          <View
+                            {...dragControls.handleProps}
+                            style={[
+                              styles.dragHandleBadge,
+                              {
+                                backgroundColor: theme.isDark
+                                  ? 'rgba(255,255,255,0.08)'
+                                  : 'rgba(0,0,0,0.06)',
+                              },
+                            ]}
+                          >
+                            <Text style={{ color: theme.muted, fontSize: 18 }}>
+                              ⠿
+                            </Text>
+                          </View>
+                          <View
+                            {...dragControls.handleProps}
+                            style={styles.compactInfo}
+                          >
+                            <Text
+                              style={[
+                                styles.cardTitle,
+                                {
+                                  color: theme.text,
+                                  fontStyle: theme.headItalic
+                                    ? 'italic'
+                                    : 'normal',
+                                },
+                              ]}
+                            >
+                              {task.title}
+                            </Text>
+                            {!!task.detail && (
+                              <Text
+                                style={[
+                                  styles.cardDetail,
+                                  { color: theme.muted },
+                                ]}
+                              >
+                                {task.detail}
+                              </Text>
+                            )}
+                          </View>
+                          <TouchableOpacity
+                            disabled={idx === 0}
+                            onPress={() => moveTask(task.id, -1)}
+                            style={[
+                              styles.iconBtn,
+                              {
+                                backgroundColor: theme.surface,
+                                borderColor: theme.isDark
+                                  ? 'rgba(255,255,255,0.18)'
+                                  : 'rgba(0,0,0,0.15)',
+                                opacity: idx === 0 ? 0.3 : 1,
+                              },
+                            ]}
+                          >
+                            <Text style={{ color: theme.text, fontSize: 13 }}>
+                              ▲
+                            </Text>
+                          </TouchableOpacity>
+                          <TouchableOpacity
+                            disabled={idx === displayedActiveTasks.length - 1}
+                            onPress={() => moveTask(task.id, 1)}
+                            style={[
+                              styles.iconBtn,
+                              {
+                                backgroundColor: theme.surface,
+                                borderColor: theme.isDark
+                                  ? 'rgba(255,255,255,0.18)'
+                                  : 'rgba(0,0,0,0.15)',
+                                opacity:
+                                  idx === displayedActiveTasks.length - 1
+                                    ? 0.3
+                                    : 1,
+                              },
+                            ]}
+                          >
+                            <Text style={{ color: theme.text, fontSize: 13 }}>
+                              ▼
+                            </Text>
+                          </TouchableOpacity>
+                        </>
+                      )}
+
+                      <View style={taskReorderMode ? { display: 'none' } : undefined}>
                       <View style={styles.taskMainRow}>
                         {/* Yuvarlak Onay Kutusu (Google Tasks tarzı) */}
                         <AnimatedCheckCircle
@@ -3431,12 +3740,14 @@ function GunlukPlanScreen() {
                           tickStyle={styles.taskCircleTick}
                         />
 
-                        {/* Görev Başlığı, Açıklaması ve Tarih Etiketi */}
+                        {/* Görev Başlığı, Açıklaması ve Tarih Etiketi (Basılı Tutup Sürükle destekli) */}
+                        <View
+                          {...dragControls.longPressDragProps}
+                          style={styles.taskBodyPressable}
+                        >
                         <Pressable
                           onPress={() => openTaskModal(task)}
-                          onLongPress={() => openTaskModal(task)}
                           style={({ pressed }) => [
-                            styles.taskBodyPressable,
                             { opacity: pressed ? 0.75 : 1 },
                           ]}
                         >
@@ -3491,6 +3802,7 @@ function GunlukPlanScreen() {
                             </View>
                           )}
                         </Pressable>
+                        </View>
 
                         {/* Yıldız (Önemli) Butonu */}
                         <TouchableOpacity
@@ -3511,6 +3823,30 @@ function GunlukPlanScreen() {
                             {task.starred ? '★' : '☆'}
                           </Text>
                         </TouchableOpacity>
+
+                        {/* Sürükle-Bırak Tutamacı */}
+                        {displayedActiveTasks.length > 1 && (
+                          <View
+                            {...dragControls.handleProps}
+                            accessibilityLabel="Sürükleyerek sırala"
+                            style={{
+                              paddingHorizontal: 5,
+                              paddingVertical: 4,
+                              justifyContent: 'center',
+                              alignItems: 'center',
+                            }}
+                          >
+                            <Text
+                              style={{
+                                color: theme.muted,
+                                fontSize: 15,
+                                opacity: 0.65,
+                              }}
+                            >
+                              ⠿
+                            </Text>
+                          </View>
+                        )}
                       </View>
 
                       {/* Alt Görevler (Google Tasks gibi girintili) */}
@@ -3561,11 +3897,14 @@ function GunlukPlanScreen() {
                           ))}
                         </View>
                       )}
+                      </View>
                     </View>
+                    </TaskRowMotion>
+                    </SwipeableTaskRow>
                     </FadeSlideIn>
                   );
-                })}
-              </View>
+                }}
+              />
             )}
 
             {/* Tamamlananlar Bölümü (Google Görevler gibi açılır/kapanır) */}
@@ -3621,11 +3960,35 @@ function GunlukPlanScreen() {
                 {completedExpanded && (
                   <View style={styles.completedList}>
                     {completedTasks.map((task) => (
-                      <View
+                      <SwipeableTaskRow
                         key={task.id}
+                        borderRadius={10}
+                        rightLabel="Geri Al"
+                        leftLabel="Sil"
+                        rightColor={MARK_COLORS.green}
+                        leftColor={MARK_COLORS.red}
+                        onSwipeActiveChange={setListGestureActive}
+                        onThresholdHaptic={() => {
+                          Haptics.impactAsync(
+                            Haptics.ImpactFeedbackStyle.Light
+                          ).catch(() => {});
+                        }}
+                        onSwipeRight={() => {
+                          Haptics.selectionAsync().catch(() => {});
+                          handleToggleTaskDone(task.id);
+                        }}
+                        onSwipeLeft={() => {
+                          Haptics.notificationAsync(
+                            Haptics.NotificationFeedbackType.Warning
+                          ).catch(() => {});
+                          handleDeleteSingleTask(task.id);
+                        }}
+                      >
+                      <View
                         style={[
                           styles.completedTaskRow,
                           {
+                            backgroundColor: theme.surface,
                             borderTopColor: theme.isDark
                               ? 'rgba(255,255,255,0.08)'
                               : 'rgba(0,0,0,0.06)',
@@ -3686,6 +4049,7 @@ function GunlukPlanScreen() {
                           </Text>
                         </TouchableOpacity>
                       </View>
+                      </SwipeableTaskRow>
                     ))}
                   </View>
                 )}
@@ -3703,7 +4067,18 @@ function GunlukPlanScreen() {
                     ]}
                   />
                   <Text style={[styles.legendText, { color: theme.muted }]}>
-                    Daire: dokun tamamla · Görev: dokun detay & alt görev ekle
+                    Sağa kaydır: yeşil dalga ile tamamla · Sola kaydır: sil
+                  </Text>
+                </View>
+                <View style={styles.legendItem}>
+                  <View
+                    style={[
+                      styles.dotSmall,
+                      { backgroundColor: theme.accent },
+                    ]}
+                  />
+                  <Text style={[styles.legendText, { color: theme.muted }]}>
+                    Basılı tut veya ⠿ tutamacından çek: yaylı sürükle-bırak sırala
                   </Text>
                 </View>
               </View>
@@ -3713,10 +4088,11 @@ function GunlukPlanScreen() {
       ) : (
         /* Ana İçerik (Günlük Rutin) */
         <ScrollView
+          ref={mainScrollRef}
           style={styles.mainScroll}
           contentContainerStyle={styles.mainContent}
-        showsVerticalScrollIndicator={false}
-      >
+          showsVerticalScrollIndicator={false}
+        >
         {/* Hero Kartı (Yumuşak Gradyan & Derinlikli Gölge) */}
         <FadeSlideIn key={`hero-${activeTab.id}`} style={styles.heroLayer}>
         <PopOnChange value={celebrateKey} scaleTo={1.03}>
@@ -3863,6 +4239,51 @@ function GunlukPlanScreen() {
             </TouchableOpacity>
           </View>
 
+          {/* Aylık Görünüm Butonu (Ekim 2026 seçicisinin hemen yanı başında) */}
+          <TouchableOpacity
+            activeOpacity={0.8}
+            onPress={() => {
+              Haptics.selectionAsync().catch(() => {});
+              setMonthlyViewMode((v) => !v);
+            }}
+            style={[
+              monthlyViewMode ? styles.primaryBtn : styles.pillBtn,
+              monthlyViewMode
+                ? {
+                    backgroundColor: theme.accent,
+                    shadowColor: theme.accent,
+                    paddingVertical: 8,
+                    paddingHorizontal: 12,
+                  }
+                : {
+                    backgroundColor: theme.surface,
+                    borderColor: theme.cardBorderColor,
+                    paddingVertical: 8,
+                    paddingHorizontal: 12,
+                  },
+            ]}
+            accessibilityLabel="Aylık görünümü aç veya kapat"
+          >
+            <View style={styles.btnContentRow}>
+              <MicroIcon
+                name="calendar"
+                size={12}
+                color={monthlyViewMode ? theme.accentInk : theme.accent}
+              />
+              <Text
+                style={[
+                  styles.pillBtnText,
+                  {
+                    color: monthlyViewMode ? theme.accentInk : theme.text,
+                    fontWeight: '700',
+                  },
+                ]}
+              >
+                {monthlyViewMode ? 'Aylık ✓' : 'Aylık Görünüm'}
+              </Text>
+            </View>
+          </TouchableOpacity>
+
           {!isCurrentMonth && (
             <TouchableOpacity
               onPress={() => changeMonth('today')}
@@ -3885,7 +4306,6 @@ function GunlukPlanScreen() {
               <TouchableOpacity
                 onPress={() => {
                   Haptics.selectionAsync().catch(() => {});
-                  animateLayout();
                   setReorderMode((v) => !v);
                 }}
                 style={[
@@ -3955,102 +4375,32 @@ function GunlukPlanScreen() {
             </Text>
           </View>
         ) : (
-          <View style={styles.cardsList}>
-            {tabHabits.map((h, i) => {
-              if (reorderMode) {
-                return (
-                  <View
-                    key={h.id}
-                    style={[
-                      styles.card,
-                      styles.compactCard,
-                      {
-                        backgroundColor: theme.surface,
-                        borderRadius: theme.radius,
-                        borderColor: theme.cardBorderColor,
-                        borderWidth: theme.cardBorderWidth,
-                        shadowColor: theme.isDark ? '#000' : theme.accent,
-                      },
-                    ]}
-                  >
-                    <View
-                      style={[
-                        styles.dragHandleBadge,
-                        {
-                          backgroundColor: theme.isDark
-                            ? 'rgba(255,255,255,0.06)'
-                            : 'rgba(0,0,0,0.04)',
-                        },
-                      ]}
-                    >
-                      <Text style={{ color: theme.muted, fontSize: 16 }}>
-                        ⠿
-                      </Text>
-                    </View>
-                    <View style={styles.compactInfo}>
-                      <Text
-                        style={[
-                          styles.cardTitle,
-                          {
-                            color: theme.text,
-                            fontStyle: theme.headItalic ? 'italic' : 'normal',
-                          },
-                        ]}
-                      >
-                        {h.name}
-                      </Text>
-                      {!!h.detail && (
-                        <Text
-                          style={[styles.cardDetail, { color: theme.muted }]}
-                        >
-                          {h.detail}
-                        </Text>
-                      )}
-                    </View>
-                    <TouchableOpacity
-                      disabled={i === 0}
-                      onPress={() => moveHabit(h.id, -1)}
-                      style={[
-                        styles.iconBtn,
-                        {
-                          backgroundColor: theme.isDark
-                            ? 'rgba(255,255,255,0.05)'
-                            : 'rgba(0,0,0,0.04)',
-                          borderColor: 'transparent',
-                          opacity: i === 0 ? 0.3 : 1,
-                        },
-                      ]}
-                    >
-                      <Text style={{ color: theme.text, fontSize: 12 }}>▲</Text>
-                    </TouchableOpacity>
-                    <TouchableOpacity
-                      disabled={i === tabHabits.length - 1}
-                      onPress={() => moveHabit(h.id, 1)}
-                      style={[
-                        styles.iconBtn,
-                        {
-                          backgroundColor: theme.isDark
-                            ? 'rgba(255,255,255,0.05)'
-                            : 'rgba(0,0,0,0.04)',
-                          borderColor: 'transparent',
-                          opacity: i === tabHabits.length - 1 ? 0.3 : 1,
-                        },
-                      ]}
-                    >
-                      <Text style={{ color: theme.text, fontSize: 12 }}>▼</Text>
-                    </TouchableOpacity>
-                  </View>
-                );
-              }
-
-              const { cur, best } = calculateStreaks(
-                state.marks[h.id],
-                today.key
-              );
+          <SpringDragList
+            items={tabHabits}
+            keyExtractor={(h) => h.id}
+            onReorder={reorderHabit}
+            onDragActiveChange={setListGestureActive}
+            onStartHaptic={() => {
+              Haptics.impactAsync(
+                Haptics.ImpactFeedbackStyle.Medium
+              ).catch(() => {});
+            }}
+            onStepHaptic={() => {
+              Haptics.selectionAsync().catch(() => {});
+            }}
+            accentColor={theme.accent}
+            borderRadius={theme.radius}
+            style={styles.cardsList}
+            renderItem={(h, i, dragControls) => {
+              const { cur, best } = reorderMode
+                ? { cur: 0, best: 0 }
+                : calculateStreaks(state.marks[h.id], today.key);
               let monthDone = 0;
-              for (let d = 1; d <= dim; d++) {
-                if (getMark(h.id, dateKey(viewMonth.y, viewMonth.m, d)) === 'g') {
-                  monthDone++;
+              if (!reorderMode) {
+                for (let d = 1; d <= dim; d++) {
+                  if (getMark(h.id, dateKey(viewMonth.y, viewMonth.m, d)) === 'g') {
+                    monthDone++;
+                  }
                 }
               }
               const todayMark = getMark(h.id, today.key);
@@ -4078,27 +4428,148 @@ function GunlukPlanScreen() {
               }
 
               return (
-                <FadeSlideIn key={h.id} index={i}>
-                <PressableScale
-                  scaleTo={0.985}
-                  onPress={() => handleCardPress(h)}
-                  onLongPress={() => openEditor(h)}
-                  delayLongPress={380}
-                  style={({ pressed }) => [
+                <FadeSlideIn index={i}>
+                <SwipeableTaskRow
+                  disabled={reorderMode}
+                  enableRightSwipe={false}
+                  leftActionMode="bounce"
+                  leftLabel="Düzenle"
+                  leftIcon="✎"
+                  leftColor={theme.accent}
+                  borderRadius={theme.radius}
+                  ignoreSwipeRef={ignoreHabitSwipeRef}
+                  onSwipeActiveChange={setListGestureActive}
+                  onThresholdHaptic={() => {
+                    Haptics.impactAsync(
+                      Haptics.ImpactFeedbackStyle.Light
+                    ).catch(() => {});
+                  }}
+                  onSwipeLeft={() => {
+                    Haptics.impactAsync(
+                      Haptics.ImpactFeedbackStyle.Medium
+                    ).catch(() => {});
+                    openEditor(h);
+                  }}
+                >
+                <View
+                  style={[
                     styles.card,
+                    reorderMode && styles.compactCard,
                     {
                       backgroundColor: theme.surface,
                       borderRadius: theme.radius,
                       borderColor: theme.cardBorderColor,
                       borderWidth: theme.cardBorderWidth,
                       shadowColor: theme.isDark ? '#000000' : theme.accent,
-                      opacity: pressed ? 0.95 : 1,
                     },
                   ]}
                 >
+                  {reorderMode && (
+                    <>
+                      <View
+                        {...dragControls.handleProps}
+                        style={[
+                          styles.dragHandleBadge,
+                          {
+                            backgroundColor: theme.isDark
+                              ? 'rgba(255,255,255,0.06)'
+                              : 'rgba(0,0,0,0.04)',
+                          },
+                        ]}
+                      >
+                        <Text style={{ color: theme.muted, fontSize: 16 }}>
+                          ⠿
+                        </Text>
+                      </View>
+                      <View
+                        {...dragControls.handleProps}
+                        style={styles.compactInfo}
+                      >
+                        <Text
+                          style={[
+                            styles.cardTitle,
+                            {
+                              color: theme.text,
+                              fontStyle: theme.headItalic ? 'italic' : 'normal',
+                            },
+                          ]}
+                        >
+                          {h.name}
+                        </Text>
+                        {!!h.detail && (
+                          <Text
+                            style={[styles.cardDetail, { color: theme.muted }]}
+                          >
+                            {h.detail}
+                          </Text>
+                        )}
+                      </View>
+                      <TouchableOpacity
+                        disabled={i === 0}
+                        onPress={() => moveHabit(h.id, -1)}
+                        style={[
+                          styles.iconBtn,
+                          {
+                            backgroundColor: theme.isDark
+                              ? 'rgba(255,255,255,0.05)'
+                              : 'rgba(0,0,0,0.04)',
+                            borderColor: 'transparent',
+                            opacity: i === 0 ? 0.3 : 1,
+                          },
+                        ]}
+                      >
+                        <Text style={{ color: theme.text, fontSize: 12 }}>▲</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity
+                        disabled={i === tabHabits.length - 1}
+                        onPress={() => moveHabit(h.id, 1)}
+                        style={[
+                          styles.iconBtn,
+                          {
+                            backgroundColor: theme.isDark
+                              ? 'rgba(255,255,255,0.05)'
+                              : 'rgba(0,0,0,0.04)',
+                            borderColor: 'transparent',
+                            opacity: i === tabHabits.length - 1 ? 0.3 : 1,
+                          },
+                        ]}
+                      >
+                        <Text style={{ color: theme.text, fontSize: 12 }}>▼</Text>
+                      </TouchableOpacity>
+                    </>
+                  )}
+
+                  <View style={reorderMode ? { display: 'none' } : undefined}>
                   {/* Kart Üst Kısmı (Gelişmiş Tipografi + Mikro-İkonlu İstatistikler + Bugün Aktivite Çemberi) */}
                   <View style={styles.cardHead}>
-                    <View style={styles.cardInfo}>
+                    {tabHabits.length > 1 && (
+                      <View
+                        {...dragControls.handleProps}
+                        accessibilityLabel="Sürükleyerek sırala"
+                        style={{
+                          paddingRight: 8,
+                          paddingVertical: 6,
+                          justifyContent: 'center',
+                        }}
+                      >
+                        <Text
+                          style={{
+                            color: theme.muted,
+                            fontSize: 16,
+                            opacity: 0.72,
+                          }}
+                        >
+                          ⠿
+                        </Text>
+                      </View>
+                    )}
+                    <View
+                      {...dragControls.longPressDragProps}
+                      style={styles.cardInfo}
+                    >
+                    <Pressable
+                      onPress={() => handleCardPress(h)}
+                    >
                       <View style={styles.cardTitleGroup}>
                         <Text
                           style={[
@@ -4212,6 +4683,7 @@ function GunlukPlanScreen() {
                           </View>
                         )}
                       </View>
+                    </Pressable>
                     </View>
 
                     {/* Bugün Aktivite Çemberi & Minimal Etiketi */}
@@ -4256,28 +4728,85 @@ function GunlukPlanScreen() {
                           onPress={() => handleCellPress(h, today.key)}
                           onLongPress={() => handleCellLongPress(h, today.key)}
                           delayLongPress={380}
-                          style={({ pressed }) => [
-                            styles.todayBtn,
-                            {
-                              backgroundColor: todayMarkObj
-                                ? todayMarkObj.color
-                                : theme.isDark
-                                ? 'rgba(255,255,255,0.06)'
-                                : withAlpha(theme.accent, 0.08),
-                              borderColor: todayMarkObj
-                                ? 'rgba(255,255,255,0.32)'
-                                : withAlpha(theme.accent, 0.55),
-                              shadowColor: todayMarkObj
-                                ? todayMarkObj.color
-                                : theme.accent,
-                              shadowOpacity: todayMarkObj ? 0.38 : 0.12,
-                              shadowRadius: todayMarkObj ? 10 : 5,
-                              shadowOffset: { width: 0, height: 4 },
-                              elevation: todayMarkObj ? 4 : 1,
-                              transform: [{ scale: pressed ? 0.91 : 1 }],
-                            },
-                          ]}
+                          style={({ pressed }) => {
+                            const isPartialLiquid =
+                              hasActiveGoal &&
+                              !!h.goal &&
+                              (h.goal.type === 'amount' ||
+                                h.goal.type === 'reps') &&
+                              todayProg > 0 &&
+                              todayProg < h.goal.target &&
+                              todayMark === 'b';
+                            return [
+                              styles.todayBtn,
+                              {
+                                backgroundColor: isPartialLiquid
+                                  ? theme.isDark
+                                    ? 'rgba(14,165,233,0.12)'
+                                    : 'rgba(14,165,233,0.08)'
+                                  : todayMarkObj
+                                  ? todayMarkObj.color
+                                  : theme.isDark
+                                  ? 'rgba(255,255,255,0.06)'
+                                  : withAlpha(theme.accent, 0.08),
+                                borderColor: isPartialLiquid
+                                  ? '#38bdf8'
+                                  : todayMarkObj
+                                  ? 'rgba(255,255,255,0.32)'
+                                  : withAlpha(theme.accent, 0.55),
+                                shadowColor: todayMarkObj
+                                  ? todayMarkObj.color
+                                  : theme.accent,
+                                shadowOpacity: todayMarkObj ? 0.38 : 0.12,
+                                shadowRadius: todayMarkObj ? 10 : 5,
+                                shadowOffset: { width: 0, height: 4 },
+                                elevation: todayMarkObj ? 4 : 1,
+                                transform: [{ scale: pressed ? 0.91 : 1 }],
+                              },
+                            ];
+                          }}
                         >
+                          {hasActiveGoal &&
+                            !!h.goal &&
+                            (h.goal.type === 'amount' ||
+                              h.goal.type === 'reps') &&
+                            todayProg > 0 &&
+                            todayProg < h.goal.target &&
+                            todayMark === 'b' && (
+                              <View
+                                pointerEvents="none"
+                                style={{
+                                  position: 'absolute',
+                                  top: 0,
+                                  left: 0,
+                                  right: 0,
+                                  bottom: 0,
+                                  borderRadius: 999,
+                                  overflow: 'hidden',
+                                }}
+                              >
+                                <View
+                                  style={{
+                                    position: 'absolute',
+                                    left: 0,
+                                    right: 0,
+                                    bottom: 0,
+                                    height: `${Math.min(
+                                      95,
+                                      Math.max(
+                                        12,
+                                        Math.round(
+                                          (todayProg / h.goal.target) * 100
+                                        )
+                                      )
+                                    )}%`,
+                                    backgroundColor: '#0ea5e9',
+                                    borderTopWidth: 2,
+                                    borderTopColor: '#bae6fd',
+                                  }}
+                                />
+                              </View>
+                            )}
                           <Text
                             style={[
                               styles.todayBtnNum,
@@ -4313,12 +4842,254 @@ function GunlukPlanScreen() {
                     </View>
                   </View>
 
-                  {/* Aylık Aktivite Çemberleri (7 Günlük Haftalık Görünüm & Yatay Kaydırma) */}
+                  {/* Aktivite Çemberleri: Aylık Takvim Görünümü (3 Satır Kompakt) veya 7 Günlük Haftalık Görünüm */}
+                  {monthlyViewMode ? (
+                    (() => {
+                      const monthCols = 11;
+                      const mCellSize = Math.min(
+                        22,
+                        Math.max(
+                          18,
+                          Math.floor((cardInnerWidth - 50) / monthCols)
+                        )
+                      );
+                      const mCellGap = Math.max(
+                        4,
+                        Math.floor(
+                          (cardInnerWidth - mCellSize * monthCols) /
+                            (monthCols - 1)
+                        )
+                      );
+                      const mLinkH = 11;
+
+                      return (
+                        <View
+                          style={{
+                            marginTop: 6,
+                            marginBottom: -4,
+                            gap: 4,
+                            alignSelf: 'center',
+                            width: cardInnerWidth,
+                          }}
+                        >
+                          {[0, 1, 2].map((rowIdx) => {
+                            const rowDays = daysArray.slice(
+                              rowIdx * monthCols,
+                              (rowIdx + 1) * monthCols
+                            );
+                            if (rowDays.length === 0) return null;
+
+                            return (
+                              <View
+                                key={`m-row-${rowIdx}`}
+                                style={{
+                                  flexDirection: 'row',
+                                  alignItems: 'center',
+                                  gap: mCellGap,
+                                  position: 'relative',
+                                  height: mCellSize,
+                                }}
+                              >
+                                {rowDays.map((d) => {
+                                  const k = dateKey(
+                                    viewMonth.y,
+                                    viewMonth.m,
+                                    d
+                                  );
+                                  const mark = getMark(h.id, k);
+                                  const markObj = mark ? MARKS[mark] : null;
+                                  const isFuture = k > today.key;
+                                  const isToday = k === today.key;
+                                  const prevMark =
+                                    d > 1
+                                      ? getMark(
+                                          h.id,
+                                          dateKey(
+                                            viewMonth.y,
+                                            viewMonth.m,
+                                            d - 1
+                                          )
+                                        )
+                                      : null;
+                                  const nextMark =
+                                    d < dim
+                                      ? getMark(
+                                          h.id,
+                                          dateKey(
+                                            viewMonth.y,
+                                            viewMonth.m,
+                                            d + 1
+                                          )
+                                        )
+                                      : null;
+                                  const inGreenChain =
+                                    mark === 'g' &&
+                                    (prevMark === 'g' || nextMark === 'g');
+
+                                  return (
+                                    <View
+                                      key={k}
+                                      style={{
+                                        width: mCellSize,
+                                        height: mCellSize,
+                                        position: 'relative',
+                                      }}
+                                    >
+                                      <Pressable
+                                        disabled={isFuture}
+                                        onPress={() => handleCellPress(h, k)}
+                                        onLongPress={() =>
+                                          handleCellLongPress(h, k)
+                                        }
+                                        delayLongPress={380}
+                                        style={[
+                                          styles.chainCell,
+                                          {
+                                            width: mCellSize,
+                                            height: mCellSize,
+                                            borderRadius: mCellSize / 2,
+                                            backgroundColor: markObj
+                                              ? markObj.color
+                                              : isToday
+                                              ? withAlpha(theme.accent, 0.14)
+                                              : theme.isDark
+                                              ? 'rgba(255,255,255,0.055)'
+                                              : 'rgba(0,0,0,0.04)',
+                                            borderColor: inGreenChain
+                                              ? 'rgba(167, 243, 208, 0.72)'
+                                              : markObj
+                                              ? 'rgba(255,255,255,0.28)'
+                                              : isToday
+                                              ? theme.accent
+                                              : theme.isDark
+                                              ? 'rgba(255,255,255,0.07)'
+                                              : 'rgba(0,0,0,0.04)',
+                                            borderWidth: inGreenChain
+                                              ? 1.4
+                                              : isToday && !markObj
+                                              ? 1.6
+                                              : 1,
+                                            opacity: isFuture ? 0.3 : 1,
+                                          },
+                                        ]}
+                                      >
+                                        <Text
+                                          allowFontScaling={false}
+                                          style={{
+                                            fontSize: 9.5,
+                                            fontVariant: ['tabular-nums'],
+                                            color: markObj
+                                              ? '#ffffff'
+                                              : isToday
+                                              ? theme.accent
+                                              : theme.muted,
+                                            fontWeight:
+                                              markObj || isToday
+                                                ? '800'
+                                                : '600',
+                                          }}
+                                        >
+                                          {d}
+                                        </Text>
+                                        {markObj && (
+                                          <View
+                                            style={{
+                                              position: 'absolute',
+                                              right: -1.5,
+                                              bottom: -1.5,
+                                              width: 8.5,
+                                              height: 8.5,
+                                              borderRadius: 4.25,
+                                              backgroundColor: '#ffffff',
+                                              alignItems: 'center',
+                                              justifyContent: 'center',
+                                            }}
+                                          >
+                                            <Text
+                                              allowFontScaling={false}
+                                              style={{
+                                                fontSize: 6,
+                                                fontWeight: '900',
+                                                color: markObj.color,
+                                                lineHeight: 7,
+                                              }}
+                                            >
+                                              {markObj.symbol}
+                                            </Text>
+                                          </View>
+                                        )}
+                                      </Pressable>
+                                    </View>
+                                  );
+                                })}
+
+                                {/* Satır İçi 3B Metalik Zincir & Lazer Dalgası Köprüleri */}
+                                {rowDays.map((d, colIdx) => {
+                                  if (
+                                    colIdx >= rowDays.length - 1 ||
+                                    d >= dim
+                                  ) {
+                                    return null;
+                                  }
+                                  const k = dateKey(
+                                    viewMonth.y,
+                                    viewMonth.m,
+                                    d
+                                  );
+                                  const mark = getMark(h.id, k);
+                                  const nextMark = getMark(
+                                    h.id,
+                                    dateKey(viewMonth.y, viewMonth.m, d + 1)
+                                  );
+                                  const linkActive =
+                                    mark === 'g' && nextMark === 'g';
+                                  const linkColor =
+                                    mark === 'g' && nextMark === 'g'
+                                      ? MARK_COLORS.green
+                                      : mark === 'b' && nextMark === 'b'
+                                      ? MARK_COLORS.blue
+                                      : MARK_COLORS.green;
+
+                                  return (
+                                    <ChainLink
+                                      key={`m-link-${k}`}
+                                      active={linkActive}
+                                      color={linkColor}
+                                      trackColor={
+                                        theme.isDark
+                                          ? 'rgba(255,255,255,0.08)'
+                                          : 'rgba(0,0,0,0.06)'
+                                      }
+                                      width={mCellGap}
+                                      height={mLinkH}
+                                      delay={14}
+                                      stepIndex={d}
+                                      style={{
+                                        position: 'absolute',
+                                        left:
+                                          (colIdx + 1) * mCellSize +
+                                          colIdx * mCellGap,
+                                        top: (mCellSize - mLinkH) / 2,
+                                        elevation: 6,
+                                      }}
+                                    />
+                                  );
+                                })}
+                              </View>
+                            );
+                          })}
+                        </View>
+                      );
+                    })()
+                  ) : (
                   <HabitWeekScroll
                     initialScrollX={initialScrollX}
                     rowViewportWidth={rowViewportWidth}
                     cellStep={cellStep}
                     scrollKey={scrollKey}
+                    onTouchChange={(t) => {
+                      ignoreHabitSwipeRef.current = t;
+                    }}
                   >
                     {daysArray.map((d) => {
                       const k = dateKey(viewMonth.y, viewMonth.m, d);
@@ -4326,96 +5097,170 @@ function GunlukPlanScreen() {
                       const markObj = mark ? MARKS[mark] : null;
                       const isFuture = k > today.key;
                       const isToday = k === today.key;
+                      const prevMark =
+                        d > 1
+                          ? getMark(
+                              h.id,
+                              dateKey(viewMonth.y, viewMonth.m, d - 1)
+                            )
+                          : null;
+                      const nextMark =
+                        d < dim
+                          ? getMark(
+                              h.id,
+                              dateKey(viewMonth.y, viewMonth.m, d + 1)
+                            )
+                          : null;
+                      const inGreenChain =
+                        mark === 'g' && (prevMark === 'g' || nextMark === 'g');
 
                       return (
-                        <MarkPop
+                        <View
                           key={k}
-                          mark={mark}
-                          color={markObj?.color}
-                          radiusStyle={{ borderRadius: 999 }}
-                          ringScale={1.38}
+                          style={{
+                            width: cellSize,
+                            height: cellSize,
+                            position: 'relative',
+                          }}
                         >
-                        <Pressable
-                          disabled={isFuture}
-                          onPress={() => handleCellPress(h, k)}
-                          onLongPress={() => handleCellLongPress(h, k)}
-                          delayLongPress={380}
-                          style={({ pressed }) => [
-                            styles.chainCell,
-                            {
-                              width: cellSize,
-                              height: cellSize,
-                              borderRadius: cellSize / 2,
-                              backgroundColor: markObj
-                                ? markObj.color
-                                : isToday
-                                ? withAlpha(theme.accent, 0.12)
-                                : theme.isDark
-                                ? 'rgba(255,255,255,0.055)'
-                                : 'rgba(0,0,0,0.04)',
-                              borderColor: markObj
-                                ? 'rgba(255,255,255,0.28)'
-                                : isToday
-                                ? theme.accent
-                                : theme.isDark
-                                ? 'rgba(255,255,255,0.07)'
-                                : 'rgba(0,0,0,0.04)',
-                              borderWidth: isToday && !markObj ? 2 : 1.2,
-                              shadowColor: markObj
-                                ? markObj.color
-                                : 'transparent',
-                              shadowOffset: { width: 0, height: 3 },
-                              shadowOpacity: markObj ? 0.34 : 0,
-                              shadowRadius: markObj ? 7 : 0,
-                              elevation: markObj ? 3 : 0,
-                              opacity: isFuture ? 0.3 : 1,
-                              transform: [{ scale: pressed ? 0.88 : 1 }],
-                            },
-                          ]}
-                        >
-                          <Text
+                          <Pressable
+                            disabled={isFuture}
+                            onPress={() => handleCellPress(h, k)}
+                            onLongPress={() => handleCellLongPress(h, k)}
+                            delayLongPress={380}
                             style={[
-                              styles.chainCellText,
+                              styles.chainCell,
                               {
-                                color: markObj
-                                  ? '#ffffff'
+                                width: cellSize,
+                                height: cellSize,
+                                borderRadius: cellSize / 2,
+                                backgroundColor: markObj
+                                  ? markObj.color
+                                  : isToday
+                                  ? withAlpha(theme.accent, 0.12)
+                                  : theme.isDark
+                                  ? 'rgba(255,255,255,0.055)'
+                                  : 'rgba(0,0,0,0.04)',
+                                borderColor: inGreenChain
+                                  ? 'rgba(167, 243, 208, 0.72)'
+                                  : markObj
+                                  ? 'rgba(255,255,255,0.28)'
                                   : isToday
                                   ? theme.accent
-                                  : theme.muted,
-                                fontWeight:
-                                  markObj || isToday ? '800' : '600',
+                                  : theme.isDark
+                                  ? 'rgba(255,255,255,0.07)'
+                                  : 'rgba(0,0,0,0.04)',
+                                borderWidth: inGreenChain
+                                  ? 1.8
+                                  : isToday && !markObj
+                                  ? 2
+                                  : 1.2,
+                                shadowColor: markObj
+                                  ? markObj.color
+                                  : 'transparent',
+                                shadowOffset: { width: 0, height: 1 },
+                                shadowOpacity: inGreenChain
+                                  ? 0.14
+                                  : markObj
+                                  ? 0.1
+                                  : 0,
+                                shadowRadius: inGreenChain
+                                  ? 3.5
+                                  : markObj
+                                  ? 2.5
+                                  : 0,
+                                elevation: markObj ? 1 : 0,
+                                opacity: isFuture ? 0.3 : 1,
                               },
                             ]}
                           >
-                            {d}
-                          </Text>
-                          {markObj && (
-                            <View
+                            <Text
                               style={[
-                                styles.cellStatusBadge,
-                                { backgroundColor: '#ffffff' },
+                                styles.chainCellText,
+                                {
+                                  color: markObj
+                                    ? '#ffffff'
+                                    : isToday
+                                    ? theme.accent
+                                    : theme.muted,
+                                  fontWeight:
+                                    markObj || isToday ? '800' : '600',
+                                },
                               ]}
                             >
-                              <Text
+                              {d}
+                            </Text>
+                            {markObj && (
+                              <View
                                 style={[
-                                  styles.cellStatusSymbol,
-                                  { color: markObj.color },
+                                  styles.cellStatusBadge,
+                                  { backgroundColor: '#ffffff' },
                                 ]}
                               >
-                                {markObj.symbol}
-                              </Text>
-                            </View>
-                          )}
-                        </Pressable>
-                        </MarkPop>
+                                <Text
+                                  style={[
+                                    styles.cellStatusSymbol,
+                                    { color: markObj.color },
+                                  ]}
+                                >
+                                  {markObj.symbol}
+                                </Text>
+                              </View>
+                            )}
+                          </Pressable>
+                        </View>
+                      );
+                    })}
+
+                    {/* 3B Metalik Zincir & Lazer Dalgası Köprü Katmanı (Hücrelerin üstünde, dokunmayı engellemez) */}
+                    {daysArray.map((d) => {
+                      if (d >= dim) return null;
+                      const k = dateKey(viewMonth.y, viewMonth.m, d);
+                      const mark = getMark(h.id, k);
+                      const nextMark = getMark(
+                        h.id,
+                        dateKey(viewMonth.y, viewMonth.m, d + 1)
+                      );
+                      const linkActive = mark === 'g' && nextMark === 'g';
+                      const linkColor =
+                        mark === 'g' && nextMark === 'g'
+                          ? MARK_COLORS.green
+                          : mark === 'b' && nextMark === 'b'
+                          ? MARK_COLORS.blue
+                          : MARK_COLORS.green;
+
+                      return (
+                        <ChainLink
+                          key={`link-${k}`}
+                          active={linkActive}
+                          color={linkColor}
+                          trackColor={
+                            theme.isDark
+                              ? 'rgba(255,255,255,0.08)'
+                              : 'rgba(0,0,0,0.06)'
+                          }
+                          width={cellGap}
+                          height={18}
+                          delay={18}
+                          stepIndex={d}
+                          style={{
+                            position: 'absolute',
+                            left: 10 + d * cellSize + (d - 1) * cellGap,
+                            top: 12 + (cellSize - 18) / 2,
+                            elevation: 6,
+                          }}
+                        />
                       );
                     })}
                   </HabitWeekScroll>
-                </PressableScale>
+                  )}
+                  </View>
+                </View>
+                </SwipeableTaskRow>
                 </FadeSlideIn>
               );
-            })}
-          </View>
+            }}
+          />
         )}
 
         {/* Alt Bilgi */}
@@ -4434,42 +5279,12 @@ function GunlukPlanScreen() {
                 style={[styles.dotSmall, { backgroundColor: theme.accent }]}
               />
               <Text style={[styles.legendText, { color: theme.muted }]}>
-                Kart: dokun sayaç/miktar · basılı tut düzenle
+                Kart: dokun sayaç/miktar · sola kaydır düzenle · ⠿ sürükle sırala
               </Text>
             </View>
           </View>
         </View>
       </ScrollView>
-      )}
-
-      {/* Yüzen Minimal Ayarlar Çarkı Butonu (Glassmorphism) */}
-      {!profileOpen && (
-        <TouchableOpacity
-          activeOpacity={0.85}
-          onPress={handleToggleProfile}
-          accessibilityLabel="Ayarlar ve Yedekleme"
-          style={[
-            styles.floatingGearBtn,
-            {
-              bottom: Math.max(insets.bottom, 8) + 74,
-              backgroundColor:
-                theme.surfaceGlass ||
-                withAlpha(theme.surface, theme.isDark ? 0.82 : 0.88),
-              borderColor: theme.isDark
-                ? 'rgba(255,255,255,0.12)'
-                : 'rgba(0,0,0,0.08)',
-              shadowColor: theme.isDark ? '#000' : theme.accent,
-            },
-            Platform.OS === 'web'
-              ? ({
-                  backdropFilter: 'blur(16px)',
-                  WebkitBackdropFilter: 'blur(16px)',
-                } as any)
-              : null,
-          ]}
-        >
-          <MicroIcon name="gear" size={18} color={theme.muted} />
-        </TouchableOpacity>
       )}
 
       {/* Alt Sekme Çubuğu (Glassmorphism Bottom Tab Bar) */}
@@ -4588,8 +5403,9 @@ function GunlukPlanScreen() {
       </View>
 
       {/* Basılı Tutunca Açılan Renk Menüsü */}
+      {!!menuTarget && (
       <Modal
-        visible={!!menuTarget}
+        visible
         transparent
         animationType="fade"
         onRequestClose={() => setMenuTarget(null)}
@@ -4688,10 +5504,12 @@ function GunlukPlanScreen() {
           </SheetPressable>
         </Pressable>
       </Modal>
+      )}
 
       {/* Madde Ekle / Düzenle Penceresi (Container'a basılı tutunca açılır) */}
+      {editorOpen && (
       <Modal
-        visible={editorOpen}
+        visible
         transparent
         animationType="fade"
         onRequestClose={() => setEditorOpen(false)}
@@ -5318,10 +6136,12 @@ function GunlukPlanScreen() {
           </Pressable>
         </KeyboardAvoidingView>
       </Modal>
+      )}
 
       {/* Container'a Dokununca Açılan Sayaç / Miktar / Tekrar Arayüzü */}
+      {!!actionHabit && !!actionHabit.goal && (
       <Modal
-        visible={!!actionHabit && !!actionHabit.goal}
+        visible
         transparent
         animationType="fade"
         onRequestClose={closeActionModal}
@@ -5405,22 +6225,58 @@ function GunlukPlanScreen() {
 
                       return (
                         <View style={styles.timerContainer}>
-                          <Text
-                            style={[
-                              styles.timerBigDigits,
-                              {
-                                color: isFinished
-                                  ? MARK_COLORS.green
-                                  : theme.text,
-                              },
-                            ]}
+                          <ProgressRing
+                            size={Math.min(
+                              224,
+                              Math.max(184, windowWidth - 120)
+                            )}
+                            strokeWidth={13}
+                            progress={timerPct}
+                            color={
+                              isFinished
+                                ? MARK_COLORS.green
+                                : timerRunning && timerRemaining <= 3
+                                ? '#ef4444'
+                                : theme.accent
+                            }
+                            trackColor={
+                              theme.isDark
+                                ? 'rgba(255,255,255,0.10)'
+                                : 'rgba(0,0,0,0.08)'
+                            }
+                            duration={timerRunning ? 950 : 250}
+                            pulse={timerRunning && !isFinished}
                           >
-                            {formatDuration(timerRemaining)}
-                          </Text>
+                            <Text
+                              style={[
+                                styles.timerBigDigits,
+                                {
+                                  color: isFinished
+                                    ? MARK_COLORS.green
+                                    : theme.text,
+                                },
+                              ]}
+                            >
+                              {formatDuration(timerRemaining)}
+                            </Text>
+                            <Text
+                              style={[
+                                styles.timerRingCaption,
+                                { color: theme.muted },
+                              ]}
+                            >
+                              {isFinished
+                                ? 'TAMAMLANDI'
+                                : timerRunning
+                                ? 'DEVAM EDİYOR'
+                                : 'KALAN SÜRE'}
+                            </Text>
+                          </ProgressRing>
+
                           <Text
                             style={[
                               styles.timerSubStatus,
-                              { color: theme.muted },
+                              { color: theme.muted, marginTop: 10 },
                             ]}
                           >
                             {isFinished
@@ -5430,28 +6286,31 @@ function GunlukPlanScreen() {
                               : `Hedef süre: ${formatTimerReadable(targetSec)}`}
                           </Text>
 
-                          <View
-                            style={[
-                              styles.actionProgressBg,
-                              {
-                                backgroundColor: theme.isDark
-                                  ? 'rgba(255,255,255,0.1)'
-                                  : 'rgba(0,0,0,0.08)',
-                              },
+                          <ConfettiBurst
+                            trigger={timerFinishKey}
+                            colors={[
+                              theme.accent,
+                              MARK_COLORS.green,
+                              '#facc15',
+                              '#ffffff',
                             ]}
-                          >
-                            <View
-                              style={[
-                                styles.actionProgressFill,
-                                {
-                                  width: `${timerPct}%`,
-                                  backgroundColor: isFinished
-                                    ? MARK_COLORS.green
-                                    : theme.accent,
-                                },
-                              ]}
-                            />
-                          </View>
+                            count={18}
+                            spread={96}
+                            size={6}
+                            duration={1050}
+                          />
+
+                          <FireworksCelebration
+                            trigger={timerFinishKey}
+                            colors={[
+                              theme.accent,
+                              MARK_COLORS.green,
+                              '#facc15',
+                              '#38bdf8',
+                              '#f472b6',
+                              '#ffffff',
+                            ]}
+                          />
 
                           <View style={styles.presetChipsRow}>
                             {[
@@ -5619,58 +6478,39 @@ function GunlukPlanScreen() {
 
                       return (
                         <View style={styles.amountContainer}>
-                          <View style={styles.amountHeaderNums}>
-                            <Text
-                              style={[
-                                styles.amountBigValue,
-                                {
-                                  color:
-                                    currentVal >= targetVal
-                                      ? MARK_COLORS.green
-                                      : theme.text,
-                                },
-                              ]}
-                            >
-                              {currentVal}
-                            </Text>
-                            <Text
-                              style={[
-                                styles.amountTargetText,
-                                { color: theme.muted },
-                              ]}
-                            >
-                              / {targetVal} {unitText} (%{progPct})
-                            </Text>
-                          </View>
-
-                          <View
-                            style={[
-                              styles.actionProgressBg,
-                              {
-                                backgroundColor: theme.isDark
-                                  ? 'rgba(255,255,255,0.1)'
-                                  : 'rgba(0,0,0,0.08)',
-                              },
-                            ]}
-                          >
-                            <View
-                              style={[
-                                styles.actionProgressFill,
-                                {
-                                  width: `${progPct}%`,
-                                  backgroundColor:
-                                    currentVal >= targetVal
-                                      ? MARK_COLORS.green
-                                      : theme.accent,
-                                },
-                              ]}
+                          <View style={{ alignItems: 'center', marginVertical: 4 }}>
+                            <LiquidWaveGauge
+                              size={Math.min(
+                                186,
+                                Math.max(154, windowWidth - 150)
+                              )}
+                              pct={progPct}
+                              currentValue={currentVal}
+                              targetValue={targetVal}
+                              unitText={unitText}
+                              habitName={actionHabit.name}
+                              accentColor={theme.accent}
+                              isDark={theme.isDark}
+                              textColor={theme.text}
+                              mutedColor={theme.muted}
                             />
                           </View>
+
+                          <FireworksCelebration
+                            trigger={timerFinishKey}
+                            colors={[
+                              theme.accent,
+                              MARK_COLORS.green,
+                              '#facc15',
+                              '#38bdf8',
+                              '#ffffff',
+                            ]}
+                          />
 
                           <Text
                             style={[
                               styles.subInputLabel,
-                              { color: theme.muted, marginTop: 6 },
+                              { color: theme.muted, marginTop: 4 },
                             ]}
                           >
                             Hızlı Ekle / Çıkar
@@ -5887,10 +6727,12 @@ function GunlukPlanScreen() {
           </Pressable>
         </KeyboardAvoidingView>
       </Modal>
+      )}
 
       {/* Görev Ekle / Düzenle Penceresi (Google Görevler Tarzı) */}
+      {taskModalOpen && (
       <Modal
-        visible={taskModalOpen}
+        visible
         transparent
         animationType="fade"
         onRequestClose={() => {
@@ -6511,6 +7353,20 @@ function GunlukPlanScreen() {
           </Pressable>
         </KeyboardAvoidingView>
       </Modal>
+      )}
+
+      {/* Süre bittiğinde veya günlük hedefler tamamlandığında ekranı kaplayan 3B Havai Fişek / Konfeti */}
+      <FireworksCelebration
+        trigger={celebrateKey + timerFinishKey}
+        colors={[
+          theme.accent,
+          MARK_COLORS.green,
+          '#facc15',
+          '#38bdf8',
+          '#f472b6',
+          '#ffffff',
+        ]}
+      />
 
       {/* Sekme / bölüm değişiminde tema rengi yumuşak geçiş katmanı */}
       <ThemeCrossfade color={theme.bg} />
@@ -6856,6 +7712,32 @@ const styles = StyleSheet.create({
     marginTop: 3,
     fontWeight: '600',
     textAlign: 'center',
+  },
+  heatmapHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  heatmapSummary: {
+    fontSize: 12,
+    fontWeight: '700',
+    fontVariant: ['tabular-nums'],
+  },
+  heatmapLegendRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 10,
+  },
+  heatmapLegendCell: {
+    width: 10,
+    height: 10,
+    borderRadius: 2.5,
+  },
+  heatmapLegendText: {
+    fontSize: 10.5,
+    fontWeight: '600',
   },
   profileSectionCard: {
     padding: 18,
@@ -7649,6 +8531,12 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     fontVariant: ['tabular-nums'],
     letterSpacing: 1,
+  },
+  timerRingCaption: {
+    fontSize: 10.5,
+    fontWeight: '800',
+    letterSpacing: 1.2,
+    marginTop: 2,
   },
   timerSubStatus: {
     fontSize: 13.5,

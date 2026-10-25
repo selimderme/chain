@@ -419,6 +419,36 @@ function renderTabs() {
   $('#panel').setAttribute('aria-labelledby', `tab-${state.tab}`);
 }
 
+function chainLinkSVG(uidStr, step) {
+  return `<span class="chain-link-3d" style="--step:${step}" aria-hidden="true">
+    <span class="chain-laser-track"><span class="chain-laser-wave"></span></span>
+    <svg viewBox="0 0 28 20" class="chain-rings-svg" focusable="false">
+      <defs>
+        <linearGradient id="mG-${uidStr}" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stop-color="#ffffff" stop-opacity="0.98"/>
+          <stop offset="30%" stop-color="#34d399"/>
+          <stop offset="72%" stop-color="#10b981"/>
+          <stop offset="100%" stop-color="#064e3b"/>
+        </linearGradient>
+      </defs>
+      <g class="ring-left">
+        <rect x="1.8" y="5.6" width="14.2" height="10.2" rx="5.1" stroke="rgba(0,0,0,0.42)" stroke-width="3.2" fill="none"/>
+        <rect x="1.8" y="4.8" width="14.2" height="10.2" rx="5.1" stroke="url(#mG-${uidStr})" stroke-width="2.9" fill="none"/>
+        <path d="M 5.6 5.0 H 11.4 A 4.2 4.2 0 0 1 14.8 7.2" stroke="#ecfdf5" stroke-width="1.05" stroke-linecap="round" fill="none"/>
+        <circle cx="3.2" cy="9.9" r="1.4" fill="#ecfdf5"/>
+      </g>
+      <g class="ring-right">
+        <rect x="12.0" y="5.6" width="14.2" height="10.2" rx="5.1" stroke="rgba(0,0,0,0.42)" stroke-width="3.2" fill="none"/>
+        <rect x="12.0" y="4.8" width="14.2" height="10.2" rx="5.1" stroke="url(#mG-${uidStr})" stroke-width="2.9" fill="none"/>
+        <path d="M 16.4 5.0 H 22.2 A 4.2 4.2 0 0 1 25.4 7.2" stroke="#ecfdf5" stroke-width="1.05" stroke-linecap="round" fill="none"/>
+        <circle cx="24.8" cy="9.9" r="1.4" fill="#ecfdf5"/>
+      </g>
+      <path class="ring-over" d="M 10.6 4.8 H 12.2 A 4.9 4.9 0 0 1 16.0 9.8" stroke="url(#mG-${uidStr})" stroke-width="3.0" stroke-linecap="round" fill="none"/>
+      <circle class="ring-core" cx="14" cy="10" r="2.2" fill="#ffffff" stroke="#34d399" stroke-width="1"/>
+    </svg>
+  </span>`;
+}
+
 function cellHTML(h, y, m, d, extra = '', inner = null) {
   const key = dateKey(y, m, d);
   const { key: today } = todayInfo();
@@ -426,8 +456,14 @@ function cellHTML(h, y, m, d, extra = '', inner = null) {
   const future = key > today;
   const dayName = fmtDay.format(new Date(y, m, d));
   const status = mark ? MARKS[mark].label : 'İşaretsiz';
-  return `<button type="button" class="cell ${mark ? 's-' + mark : ''} ${key === today ? 'today' : ''} ${extra}" data-cell data-id="${h.id}" data-date="${key}" ${future ? 'disabled' : ''}
-    aria-label="${esc(h.name)}, ${dayName}: ${status}" title="${dayName}">${inner ?? d}</button>`;
+  const isChainGrid = !extra;
+  const dim = isChainGrid ? daysInMonth(y, m) : 0;
+  const prevGreen = isChainGrid && d > 1 && getMark(h.id, dateKey(y, m, d - 1)) === 'g';
+  const nextGreen = isChainGrid && d < dim && getMark(h.id, dateKey(y, m, d + 1)) === 'g';
+  const inGreenChain = mark === 'g' && (prevGreen || nextGreen);
+  const linkBridge = mark === 'g' && nextGreen ? chainLinkSVG(`${h.id}-${d}`, d) : '';
+  return `<button type="button" class="cell ${mark ? 's-' + mark : ''} ${inGreenChain ? 'in-chain' : ''} ${key === today ? 'today' : ''} ${extra}" data-cell data-id="${h.id}" data-date="${key}" ${future ? 'disabled' : ''}
+    aria-label="${esc(h.name)}, ${dayName}: ${status}" title="${dayName}">${inner ?? d}${linkBridge}</button>`;
 }
 
 function renderPanel(tab) {

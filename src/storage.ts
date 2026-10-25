@@ -3,11 +3,38 @@ import {
   AppDataState,
   DEFAULT_HABITS,
   Habit,
+  HabitGoal,
   STORAGE_KEY,
   TABS,
   TabId,
 } from './constants';
 import { uid } from './utils';
+
+export function inferDefaultGoal(name: string): HabitGoal | undefined {
+  const lower = (name || '').toLocaleLowerCase('tr-TR').trim();
+  if (lower.includes('2 litre su') || lower === 'su') {
+    return { type: 'amount', target: 2000, unit: 'ml' };
+  }
+  if (lower.includes('100 g protein')) {
+    return { type: 'amount', target: 100, unit: 'g' };
+  }
+  if (lower.includes('2000 kalori')) {
+    return { type: 'amount', target: 2000, unit: 'kcal' };
+  }
+  if (lower.includes('5 porsiyon')) {
+    return { type: 'reps', target: 5, unit: 'tekrar' };
+  }
+  if (lower.includes('8000 adım')) {
+    return { type: 'amount', target: 8000, unit: 'adım' };
+  }
+  if (lower.includes('30 dk kitap')) {
+    return { type: 'timer', target: 1800, unit: 'sn' };
+  }
+  if (lower.includes('yeni kelime')) {
+    return { type: 'reps', target: 5, unit: 'tekrar' };
+  }
+  return undefined;
+}
 
 export function seedState(): AppDataState {
   const habits: Habit[] = [];
@@ -16,7 +43,8 @@ export function seedState(): AppDataState {
     [string, string][],
   ][]) {
     for (const [name, detail] of items) {
-      habits.push({ id: uid(), tab, name, detail });
+      const goal = inferDefaultGoal(name);
+      habits.push({ id: uid(), tab, name, detail, ...(goal ? { goal } : {}) });
     }
   }
   return {
@@ -55,8 +83,21 @@ export async function loadAppState(): Promise<AppDataState> {
         ][]) {
           if (!parsed.habits.some((h) => h.tab === tab)) {
             for (const [name, detail] of items) {
-              parsed.habits.push({ id: uid(), tab, name, detail });
+              const goal = inferDefaultGoal(name);
+              parsed.habits.push({
+                id: uid(),
+                tab,
+                name,
+                detail,
+                ...(goal ? { goal } : {}),
+              });
             }
+          }
+        }
+        for (const h of parsed.habits) {
+          if (h.goal === undefined) {
+            const inferred = inferDefaultGoal(h.name);
+            if (inferred) h.goal = inferred;
           }
         }
         if (!TABS.some((t) => t.id === parsed.tab)) {
