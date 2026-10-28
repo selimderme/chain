@@ -1,13 +1,5 @@
-// ─────────────────────────────────────────────────────────────────────────────
-// FIREBASE BULUT VERİTABANI VE KİMLİK DOĞRULAMA YAPILANDIRMASI (YÖNTEM B)
-// ─────────────────────────────────────────────────────────────────────────────
-// Kendi Firebase projenizi bağlamak için Firebase Console (https://console.firebase.google.com)
-// üzerinden ücretsiz bir proje oluşturup "Web Uygulaması" ayarlarındaki bilgileri
-// aşağıya yapıştırabilir veya uygulama içindeki Profil > Bulut Ayarları bölümünden girebilirsiniz.
-//
-// Not: Buradaki alanlar boş bırakıldığında uygulama otomatik olarak "Yerel Bulut Simülasyonu"
-// modunda çalışır; böylece Google, Apple, E-posta/Şifre ve Misafir girişlerini ve
-// hesap bazlı yedekleme/geri yükleme akışını anında test edebilirsiniz.
+// Public Firebase web-app configuration; authorization is enforced by Firebase Auth
+// and Firestore Security Rules. No service-account or Apple private keys belong here.
 
 export interface FirebaseConfigOptions {
   apiKey: string;
@@ -20,12 +12,12 @@ export interface FirebaseConfigOptions {
 }
 
 export const DEFAULT_FIREBASE_CONFIG: FirebaseConfigOptions = {
-  apiKey: '',
-  authDomain: '',
-  projectId: '',
-  storageBucket: '',
-  messagingSenderId: '',
-  appId: '',
+  apiKey: 'AIzaSyCsdEACatTqgQRx6dLwlVynIjR5cah1bvg',
+  authDomain: 'chain-4913a.firebaseapp.com',
+  projectId: 'chain-4913a',
+  storageBucket: 'chain-4913a.firebasestorage.app',
+  messagingSenderId: '353197873761',
+  appId: '1:353197873761:web:7f5d1e4be1b42a7d44a820',
   googleWebClientId: '',
 };
 

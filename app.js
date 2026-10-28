@@ -6,15 +6,16 @@ const LONG_PRESS_MS = 450;
 const MOVE_TOLERANCE = 10;
 
 const TABS = [
-  { id: 'beslenme', name: 'Beslenme',          emoji: '🥗', color: '#ea7826', motto: 'Vücuduna iyi bak, o da sana iyi baksın.' },
-  { id: 'egzersiz', name: 'Egzersiz',          emoji: '💪', color: '#a3e635', motto: 'Zinciri kırma. Bugün de çalış.' },
-  { id: 'bakim',    name: 'Kişisel Bakım',     emoji: '🧴', color: '#db548d', motto: 'Kendine nazik ol, kendini şımart.' },
-  { id: 'ogrenme',  name: 'Öğrenme ve Gelişim', emoji: '📚', color: '#3b82f6', motto: 'Her gün biraz daha bilge.' },
-  { id: 'ibadet',   name: 'İbadet',            emoji: '🕌', color: '#b88917', motto: 'Kalbine huzur, gününe bereket.' },
-  { id: 'kotu-aliskanliklar', name: 'Kötü Alışkanlıklar', emoji: '🚫', color: '#e1495c', motto: 'Kötü alışkanlıkları bırak, hayatına yer aç.' },
+  { id: 'beslenme', name: 'Beslenme',          emoji: '🥗', color: '#F26B27', ink: '#10120A', motto: 'Vücuduna iyi bak, o da sana iyi baksın.' },
+  { id: 'egzersiz', name: 'Egzersiz',          emoji: '💪', color: '#C2ED19', ink: '#10120A', motto: 'Zinciri kırma. Bugün de çalış.' },
+  { id: 'bakim',    name: 'Kişisel Bakım',     emoji: '🧴', color: '#E54B8E', ink: '#10120A', motto: 'Kendine nazik ol, kendini şımart.' },
+  { id: 'ogrenme',  name: 'Öğrenme ve Gelişim', emoji: '📚', color: '#3B72EB', ink: '#FFFFFF', motto: 'Her gün biraz daha bilge.' },
+  { id: 'ibadet',   name: 'İbadet',            emoji: '🕌', color: '#C28E1E', ink: '#10120A', motto: 'Kalbine huzur, gününe bereket.' },
+  { id: 'kotu-aliskanliklar', name: 'Kötü Alışkanlıklar', emoji: '🚫', color: '#E5484D', ink: '#10120A', motto: 'Kötü alışkanlıkları bırak, hayatına yer aç.' },
 ];
 
 const ICONS = {
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>',
   flame: '<svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M13.5.67s.74 2.65.74 4.8c0 2.06-1.35 3.73-3.41 3.73-2.07 0-3.63-1.67-3.63-3.73l.03-.36C5.21 7.51 4 10.62 4 14c0 4.42 3.58 8 8 8s8-3.58 8-8C20 8.61 17.41 3.8 13.5.67zM11.71 19c-1.78 0-3.22-1.4-3.22-3.14 0-1.62 1.05-2.76 2.81-3.12 1.77-.36 3.6-1.21 4.62-2.58.39 1.29.59 2.65.59 4.04 0 2.65-2.15 4.8-4.8 4.8z"/></svg>',
   trophy: '<svg viewBox="0 0 24 24" fill="none" stroke="#f59e0b" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M6 9H4.5a2.5 2.5 0 0 1 0-5H6"/><path d="M18 9h1.5a2.5 2.5 0 0 0 0-5H18"/><path d="M4 22h16"/><path d="M10 14.66V17c0 .55-.47.98-.97 1.21C7.85 18.75 7 20.24 7 22"/><path d="M14 14.66V17c0 .55.47.98.97 1.21C16.15 18.75 17 20.24 17 22"/><path d="M18 2H6v7a6 6 0 0 0 12 0V2Z"/></svg>',
   calendar: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><line x1="16" x2="16" y1="2" y2="6"/><line x1="8" x2="8" y1="2" y2="6"/><line x1="3" x2="21" y1="10" y2="10"/></svg>',
@@ -76,6 +77,65 @@ const DEFAULT_HABITS = {
   ],
 };
 
+
+const CATEGORY_ICONS = {
+  beslenme: '<path d="M5 15h26c0 9-5 14-13 14S5 24 5 15Z" fill="currentColor"/><path d="M8 12c2-5 5-5 8-1m3-2 3-4 4 3m-4 4 4-2 3 3M12 6l2-3 3 3"/>',
+  egzersiz: '<path d="M12 18h12M8 10v16m4-19v22m12-22v22m4-19v22M4 14v8m28-8v8" stroke-width="3"/>',
+  bakim: '<path d="M18 4c-11 10-10 19 0 27C28 23 29 14 18 4Zm0 9v16m-5-9 5 5 5-5M8 15 2 13c0 12 5 18 16 18 11 0 16-6 16-18l-6 2"/>',
+  ogrenme: '<path d="M18 8C11 3 6 5 3 6v24c5-2 10-1 15 2 5-3 10-4 15-2V6c-3-1-8-3-15 2Z"/><path d="M18 8v24"/>',
+  ibadet: '<path d="M8 30V19h20v11M12 18c-4-7 6-8 6-14 0 6 10 7 6 14M3 30V12m30 18V12M16 30v-7h4v7"/>',
+  'kotu-aliskanliklar': '<circle cx="18" cy="18" r="13"/><path d="m9 9 18 18"/>'
+};
+function categoryIcon(tab) { return '<svg viewBox="0 0 36 36" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">' + CATEGORY_ICONS[tab] + '</svg>'; }
+function habitEmoji(h) {
+  if (typeof h.emoji === 'string' && h.emoji) return h.emoji;
+  const name = h.name.toLocaleLowerCase('tr-TR');
+  if (name.includes('protein')) return '🍳';
+  if (name.includes('vitamin')) return '🍊';
+  if (name.includes('kalori')) return '🔥';
+  if (h.tab === 'beslenme' && name.includes('su')) return '💧';
+  return {beslenme:'🥗', egzersiz:'🏋️', bakim:'🌿', ogrenme:'📖', ibadet:'🌙', 'kotu-aliskanliklar':'🛡️'}[h.tab] || '🎯';
+}
+
+const CUSTOM_TAB_COLORS = [
+  { color: '#8B5CF6', label: 'Mor' }, { color: '#3B72EB', label: 'Mavi' },
+  { color: '#14B8A6', label: 'Turkuaz' }, { color: '#C2ED19', label: 'Yeşil' },
+  { color: '#F26B27', label: 'Turuncu' }, { color: '#E54B8E', label: 'Pembe' },
+  { color: '#E5484D', label: 'Kırmızı' }, { color: '#C28E1E', label: 'Altın' },
+  { color: '#1E3A8A', label: 'Lacivert' }, { color: '#000000', label: 'Siyah' },
+  { color: '#14532D', label: 'Koyu yeşil' }, { color: '#78350F', label: 'Kahverengi' },
+];
+function normalizeCustomTabs(value) {
+  if (!Array.isArray(value)) return [];
+  const seen = new Set();
+  return value.flatMap(item => {
+    if (!item || typeof item !== 'object' || typeof item.id !== 'string' ||
+      !/^custom-[A-Za-z0-9_-]{1,100}$/.test(item.id) || seen.has(item.id) ||
+      typeof item.name !== 'string' || !item.name.trim()) return [];
+    seen.add(item.id);
+    return [{ id: item.id, name: item.name.trim().slice(0, 40),
+      emoji: typeof item.emoji === 'string' && item.emoji.trim() ? item.emoji.trim().slice(0, 24) : '📁',
+      color: typeof item.color === 'string' && /^#[0-9a-fA-F]{6}$/.test(item.color) ? item.color : '#8B5CF6' }];
+  });
+}
+function getAccentInk(color) {
+  const [r, g, b] = [1, 3, 5].map(start => {
+    const c = parseInt(color.slice(start, start + 2), 16) / 255;
+    return c <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4;
+  });
+  return r * 0.2126 + g * 0.7152 + b * 0.0722 > 0.179 ? '#10120A' : '#FFFFFF';
+}
+function getTabs() {
+  const tabs = [...TABS.filter(tab => !state.deletedTabs?.includes(tab.id)).map(tab => {
+    const edit = state.tabEdits?.[tab.id];
+    const [valid] = normalizeCustomTabs([{ ...edit, id: 'custom-edit' }]);
+    return valid ? { ...tab, name: valid.name, emoji: valid.emoji, color: valid.color, ink: getAccentInk(valid.color), customIcon: true } : tab;
+  }), ...normalizeCustomTabs(state.customTabs).map(tab => ({ ...tab, ink: getAccentInk(tab.color), motto: 'Kendi ritmini oluştur, zincirini sürdür.' }))];
+  if (!tabs.length) return [TABS[0]];
+  const order = Array.isArray(state.tabOrder) ? [...new Set(state.tabOrder.filter(id => tabs.some(tab => tab.id === id)))] : [];
+  return [...order.map(id => tabs.find(tab => tab.id === id)), ...tabs.filter(tab => !order.includes(tab.id))];
+}
+
 /* ───────── Yardımcılar ───────── */
 const $ = (sel) => document.querySelector(sel);
 const pad = (n) => String(n).padStart(2, '0');
@@ -106,6 +166,7 @@ function load() {
       if (s && Array.isArray(s.habits) && s.marks) {
         // Yeni eklenen sekmeler varsa onların varsayılan alışkanlıklarını da ekle
         for (const [tab, items] of Object.entries(DEFAULT_HABITS)) {
+          if (Array.isArray(s.deletedTabs) && s.deletedTabs.includes(tab)) continue;
           if (!s.habits.some((h) => h.tab === tab)) {
             for (const [name, detail] of items) s.habits.push({ id: uid(), tab, name, detail });
           }
@@ -131,13 +192,16 @@ state.progress ||= {};
 state.tasks ||= [];
 state.section ||= 'rutin';
 state.profile ||= { firstName: '', lastName: '' };
-if (!TABS.some((t) => t.id === state.tab)) state.tab = TABS[0].id;
+state.customTabs = normalizeCustomTabs(state.customTabs);
+state.deletedTabs = Array.isArray(state.deletedTabs) ? state.deletedTabs.filter(id => TABS.some(tab => tab.id === id)) : [];
+if (!getTabs().some((t) => t.id === state.tab)) state.tab = getTabs()[0].id;
 save();
 navigator.storage?.persist?.().catch(() => {});
 
 let view = (() => { const n = new Date(); return { y: n.getFullYear(), m: n.getMonth() }; })();
 
 let reorderMode = false;
+let monthlyViewMode = false;
 let taskReorderMode = false;
 let taskFilter = 'all';
 let completedExpanded = true;
@@ -229,10 +293,17 @@ function streaks(id, todayKey) {
 
 /* ───────── Çizim ───────── */
 function render() {
-  const tab = TABS.find((t) => t.id === state.tab) || TABS[0];
+  const tab = getTabs().find((t) => t.id === state.tab) || TABS[0];
   const activeSec = state.section === 'gorevler' ? 'gorevler' : 'rutin';
   document.body.dataset.tab = tab.id;
   document.body.dataset.section = !profileOpen && activeSec === 'gorevler' ? 'gorevler' : 'rutin';
+  ['--accent', '--accent-end', '--accent-ink', '--accent-soft'].forEach(key => document.body.style.removeProperty(key));
+  if ((tab.id.startsWith('custom-') || tab.customIcon) && document.body.dataset.section === 'rutin') {
+    document.body.style.setProperty('--accent', tab.color);
+    document.body.style.setProperty('--accent-end', tab.color);
+    document.body.style.setProperty('--accent-ink', tab.ink);
+    document.body.style.setProperty('--accent-soft', `color-mix(in srgb, ${tab.color} 14%, #10110f)`);
+  }
   document.querySelector('meta[name="theme-color"]').content = getComputedStyle(document.body).getPropertyValue('--bg').trim() || '#fff';
   const initials = getInitials(state.profile?.firstName, state.profile?.lastName);
   const pBtn = $('#profileBtn');
@@ -256,6 +327,7 @@ function render() {
   const foot = $('#mainFoot');
   if (foot) foot.hidden = profileOpen || activeSec === 'gorevler';
   renderTabs();
+  $('#tabs').hidden = profileOpen || activeSec !== 'rutin';
   if (profileOpen) renderProfilePage();
   else if (activeSec === 'gorevler') renderTasksPanel();
   else renderPanel(tab);
@@ -267,7 +339,6 @@ function renderTasksPanel() {
   const starredCount = activeAll.filter((t) => t.starred).length;
   const displayed = taskFilter === 'starred' ? activeAll.filter((t) => t.starred) : activeAll;
   const completed = allTasks.filter((t) => t.done);
-  const pct = allTasks.length ? Math.round((completed.length / allTasks.length) * 100) : 0;
 
   const activeCards = displayed.map((t, i) => {
     if (taskReorderMode) {
@@ -322,18 +393,6 @@ function renderTasksPanel() {
   ` : '';
 
   $('#panel').innerHTML = `
-    <section class="hero">
-      <span class="emoji" aria-hidden="true">✅</span>
-      <div>
-        <h2>Görevlerim</h2>
-        <p class="motto">Yapılacakları ekle, alt görevlere böl ve tamamla.</p>
-      </div>
-      <div class="progress">
-        <span>Tamamlanan ${completed.length}/${allTasks.length}</span>
-        <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${pct}%"></span></div>
-        <span>%${pct}</span>
-      </div>
-    </section>
     <div class="toolbar">
       <button type="button" class="${taskFilter === 'all' ? 'primary' : 'pill'}" data-task-filter="all">Görevlerim (${activeAll.length})</button>
       <button type="button" class="${taskFilter === 'starred' ? 'primary' : 'pill'}" data-task-filter="starred">★ Yıldızlı (${starredCount})</button>
@@ -384,7 +443,7 @@ function renderProfilePage() {
         <h3 style="margin:0 0 8px;font-size:1.05rem">💾 Yedekleme ve Geri Yükleme</h3>
         <p class="detail" style="line-height:1.45">Tüm alışkanlıklarınız, görevlerinizdeki maddeler, alt görevleriniz, zincirleriniz, ilerleme kayıtlarınız ve profil bilgileriniz cihazınızda saklanır. Verilerinizi yedekleyebilir veya istediğiniz zaman yedekten geri yükleyebilirsiniz.</p>
         <div class="backup-info-box">
-          <div class="backup-info-row"><span>Kayıtlı Alışkanlık:</span><b>${state.habits.length} madde (${TABS.length} kategori)</b></div>
+          <div class="backup-info-row"><span>Kayıtlı Alışkanlık:</span><b>${state.habits.length} madde (${getTabs().length} kategori)</b></div>
           <div class="backup-info-row"><span>Kayıtlı Görevler:</span><b>${(state.tasks || []).length} madde (${(state.tasks || []).filter((t) => !t.done).length} aktif, ${(state.tasks || []).filter((t) => t.done).length} tamamlanan)</b></div>
           <div class="backup-info-row"><span>Toplam İşaretlenen Gün:</span><b>${totalMarked} kayıt</b></div>
           <div class="backup-info-row"><span>Son Yedekleme:</span><b>${esc(state.profile?.lastBackupAt || 'Henüz yedek alınmadı')}</b></div>
@@ -406,16 +465,16 @@ function todayInfo() {
 
 function renderTabs() {
   const { key } = todayInfo();
-  $('#tabs').innerHTML = TABS.map((t) => {
+  $('#tabs').innerHTML = getTabs().map((t) => {
     const hs = state.habits.filter((h) => h.tab === t.id);
     const done = hs.filter((h) => getMark(h.id, key) === 'g').length;
     const sel = t.id === state.tab;
-    return `<button type="button" role="tab" class="tab" id="tab-${t.id}" data-tab="${t.id}" aria-selected="${sel}" tabindex="${sel ? 0 : -1}" style="--tab-color:${t.color}">
-      <span class="t-emoji" aria-hidden="true">${t.emoji}</span>
+    return `<button type="button" role="tab" class="tab" id="tab-${t.id}" data-tab="${t.id}" aria-selected="${sel}" tabindex="${sel ? 0 : -1}" style="--tab-color:${t.color};--tab-ink:${t.ink}">
+      <span class="t-emoji" aria-hidden="true">${t.id.startsWith('custom-') || t.customIcon ? esc(t.emoji) : categoryIcon(t.id)}</span>
       <span>${esc(t.name)}</span>
       <span class="t-count">${done}/${hs.length}</span>
     </button>`;
-  }).join('');
+  }).join('') + '<button type="button" class="add-tab-btn" data-add-tab aria-label="Yeni sekme ekle"><span aria-hidden="true">＋</span><small>Yeni sekme</small></button>';
   $('#panel').setAttribute('aria-labelledby', `tab-${state.tab}`);
 }
 
@@ -505,9 +564,11 @@ function renderPanel(tab) {
         goalChip = `<span class="goal-chip">${ICONS.chart} ${todayProg}/${h.goal.target}${h.goal.unit ? ' ' + esc(h.goal.unit) : ''}</span>`;
       }
     }
-    const flameColor = cur > 0 ? '#f97316' : 'var(--muted)';
+    const flameColor = 'var(--accent)';
     return `<article class="card" data-habit="${h.id}">
       <div class="card-head" data-card-head="${h.id}">
+        <span class="routine-grip" aria-hidden="true">⠿</span>
+        <span class="habit-emblem" aria-hidden="true">${habitEmoji(h)}</span>
         <div class="card-info">
           <div class="card-title-group">
             <h4>${esc(h.name)}</h4>
@@ -515,7 +576,7 @@ function renderPanel(tab) {
           </div>
           <div class="card-stats">
             <span class="stat-pill"><span style="display:inline-grid;color:${flameColor}">${ICONS.flame}</span> <b>${cur}</b> gün</span>
-            <span class="stat-pill">${ICONS.trophy} <b>${best}</b></span>
+            <span class="stat-pill">${ICONS.trophy} Rekor <b>${best}</b></span>
             <span class="stat-pill">${ICONS.calendar} <b>${monthDone}/${dim}</b></span>
             ${goalChip}
           </div>
@@ -524,35 +585,33 @@ function renderPanel(tab) {
           ${cellHTML(h, now.getFullYear(), now.getMonth(), now.getDate(), 'today-btn', `<small>Bugün</small>${now.getDate()}`)}
         </div>
       </div>
-      <div class="chain" role="group" aria-label="${esc(h.name)} aylık zincir" style="--days: ${dim}">${cells}</div>
+      <div class="chain ${monthlyViewMode ? 'monthly' : 'weekly'}" role="group" aria-label="${esc(h.name)} aylık zincir" style="--days: ${dim}">${cells}</div>
     </article>`;
   }).join('');
 
   $('#panel').innerHTML = `
-    <section class="hero">
-      <span class="emoji" aria-hidden="true" style="animation-delay:-${Date.now() % 3200}ms">${tab.emoji}</span>
-      <div>
-        <h2>${esc(tab.name)}</h2>
-        <p class="motto">${esc(tab.motto)}</p>
-      </div>
-      <div class="progress">
-        <span>Bugün ${doneToday}/${habits.length}</span>
-        <div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="${pct}"><span style="width:${pct}%"></span></div>
-        <span>%${pct}</span>
-      </div>
-    </section>
     <div class="toolbar">
       <div class="month">
         <button type="button" class="icon-btn" data-month="-1" aria-label="Önceki ay">‹</button>
         <h3>${fmtMonth.format(new Date(y, m, 1))}</h3>
         <button type="button" class="icon-btn" data-month="1" aria-label="Sonraki ay">›</button>
       </div>
-      ${isCurrentMonth ? '' : '<button type="button" class="pill" data-month="today">Bu aya dön</button>'}
+      <button type="button" class="pill monthly-toggle ${monthlyViewMode ? 'selected' : ''}" data-monthly aria-pressed="${monthlyViewMode}">${ICONS.calendar}<span>${monthlyViewMode ? 'Aylık ✓' : 'Aylık Görünüm'}</span></button>
+      ${isCurrentMonth ? '' : '<button type="button" class="pill" data-month="today">Bu ay</button>'}
       <span class="spacer"></span>
       ${habits.length > 1 || reorderMode ? `<button type="button" class="${reorderMode ? 'primary' : 'pill'}" data-reorder aria-pressed="${reorderMode}">${reorderMode ? '✓ Bitti' : `${ICONS.sort} Sırala`}</button>` : ''}
-      ${reorderMode ? '' : '<button type="button" class="primary" data-add>＋ Madde ekle</button>'}
+      ${reorderMode ? '' : '<button type="button" class="neon-add" data-add aria-label="Yeni alışkanlık ekle">' + ICONS.plus + '</button>'}
     </div>
-    <div class="list ${reorderMode ? 'reordering' : ''}">${cards || '<p class="empty">Bu sekmede henüz madde yok. “Madde ekle” ile başla.</p>'}</div>`;
+    <div class="list ${reorderMode ? 'reordering' : ''}">${cards || '<p class="empty">Bu sekmede henüz madde yok. “＋” ile başla.</p>'}</div>`;
+  if (!monthlyViewMode) {
+    requestAnimationFrame(() => {
+      const firstDay = isCurrentMonth ? Math.max(1, Math.min(now.getDate() - 6, dim - 6)) : 1;
+      document.querySelectorAll('.chain.weekly').forEach(chain => {
+        const cell = chain.children[firstDay - 1];
+        if (cell) chain.scrollLeft = cell.offsetLeft - chain.children[0].offsetLeft;
+      });
+    });
+  }
 }
 
 /* ───────── Sekme & ay gezinme ───────── */
@@ -578,6 +637,8 @@ $('#profileBtn')?.addEventListener('click', toggleProfileAndSettings);
 $('#floatingGearBtn')?.addEventListener('click', toggleProfileAndSettings);
 
 $('#tabs').addEventListener('click', (e) => {
+  if (suppressTabClick) { suppressTabClick = false; e.preventDefault(); return; }
+  if (e.target.closest('[data-add-tab]')) { openCategoryEditor(); return; }
   const b = e.target.closest('[data-tab]');
   if (!b) return;
   const wasProfile = profileOpen;
@@ -597,14 +658,100 @@ $('#tabs').addEventListener('click', (e) => {
   $(`#tab-${state.tab}`)?.scrollIntoView({ inline: 'center', block: 'nearest' });
 });
 $('#tabs').addEventListener('keydown', (e) => {
-  const i = TABS.findIndex((t) => t.id === state.tab);
+  suppressTabClick = false;
+  if (!e.target.closest('[role="tab"]')) return;
+  const tabs = getTabs();
+  const targetId = e.target.closest('[role="tab"]').dataset.tab;
+  if (e.key === 'ContextMenu' || (e.shiftKey && e.key === 'F10')) { e.preventDefault(); openCategoryActions(targetId); return; }
+  if (e.altKey && (e.key === 'ArrowLeft' || e.key === 'ArrowRight')) {
+    e.preventDefault();
+    const from = tabs.findIndex(tab => tab.id === targetId), to = from + (e.key === 'ArrowLeft' ? -1 : 1);
+    if (to >= 0 && to < tabs.length) {
+      const [tab] = tabs.splice(from, 1); tabs.splice(to, 0, tab);
+      state.tabOrder = tabs.map(tab => tab.id); save(); renderTabs();
+      $(`#tab-${targetId}`)?.focus();
+    }
+    return;
+  }
+  const i = tabs.findIndex((t) => t.id === state.tab);
   let n = null;
-  if (e.key === 'ArrowRight') n = (i + 1) % TABS.length;
-  else if (e.key === 'ArrowLeft') n = (i - 1 + TABS.length) % TABS.length;
+  if (e.key === 'ArrowRight') n = (i + 1) % tabs.length;
+  else if (e.key === 'ArrowLeft') n = (i - 1 + tabs.length) % tabs.length;
   if (n === null) return;
   e.preventDefault();
-  state.tab = TABS[n].id; save(); render();
+  state.tab = tabs[n].id; save(); render();
   $(`#tab-${state.tab}`)?.focus();
+});
+
+// A held tab becomes draggable; only a stationary release opens its delete menu.
+let tabGesture = null;
+let suppressTabClick = false;
+const tabStrip = $('#tabs');
+function finishTabGesture(cancelled = false) {
+  const gesture = tabGesture;
+  if (!gesture) return;
+  tabGesture = null;
+  clearTimeout(gesture.timer);
+  if (tabStrip.hasPointerCapture(gesture.pointerId)) tabStrip.releasePointerCapture(gesture.pointerId);
+  gesture.button.classList.remove('tab-dragging');
+  gesture.button.style.transform = '';
+  if (gesture.scrolling) { suppressTabClick = true; return; }
+  if (gesture.armed) {
+    suppressTabClick = true;
+    if (cancelled) { renderTabs(); return; }
+    if (gesture.moved) {
+      state.tabOrder = [...tabStrip.querySelectorAll('[role="tab"]')].map(button => button.dataset.tab);
+      save(); renderTabs();
+    } else openCategoryActions(gesture.id);
+  }
+}
+tabStrip.addEventListener('pointerdown', event => {
+  if (event.button !== 0) return;
+  const button = event.target.closest('[role="tab"]');
+  if (!button) return;
+  suppressTabClick = false;
+  tabGesture = { id: button.dataset.tab, button, pointerId: event.pointerId, pointerType: event.pointerType, scrollX: tabStrip.scrollLeft, x: event.clientX, y: event.clientY, armed: false, moved: false, scrolling: false, timer: 0 };
+  const gesture = tabGesture;
+  gesture.timer = setTimeout(() => {
+    if (tabGesture !== gesture) return;
+    gesture.armed = true;
+    button.classList.add('tab-dragging');
+    tabStrip.setPointerCapture(event.pointerId);
+    navigator.vibrate?.(15);
+  }, 450);
+});
+tabStrip.addEventListener('pointermove', event => {
+  const gesture = tabGesture;
+  if (!gesture || event.pointerId !== gesture.pointerId) return;
+  const dx = event.clientX - gesture.x, dy = event.clientY - gesture.y;
+  if (gesture.scrolling) { event.preventDefault(); tabStrip.scrollLeft = gesture.scrollX - dx; return; }
+  if (!gesture.armed) {
+    if (Math.hypot(dx, dy) > 8) {
+      clearTimeout(gesture.timer);
+      if (gesture.pointerType === 'touch' && Math.abs(dx) > Math.abs(dy)) {
+        gesture.scrolling = true;
+        tabStrip.setPointerCapture(event.pointerId);
+        tabStrip.scrollLeft = gesture.scrollX - dx;
+        event.preventDefault();
+      } else finishTabGesture(true);
+    }
+    return;
+  }
+  event.preventDefault();
+  if (Math.abs(dx) > 6) gesture.moved = true;
+  if (!gesture.moved) return;
+  const others = [...tabStrip.querySelectorAll('[role="tab"]')].filter(button => button !== gesture.button);
+  const before = others.find(button => { const rect = button.getBoundingClientRect(); return event.clientX < rect.left + rect.width / 2; });
+  tabStrip.insertBefore(gesture.button, before || tabStrip.querySelector('[data-add-tab]'));
+});
+window.addEventListener('pointerup', () => finishTabGesture(false));
+window.addEventListener('pointercancel', () => finishTabGesture(true));
+window.addEventListener('blur', () => finishTabGesture(true));
+tabStrip.addEventListener('contextmenu', event => {
+  const button = event.target.closest('[role="tab"]');
+  if (!button) return;
+  event.preventDefault();
+  if (event.pointerType !== 'touch' && !tabGesture?.moved) { finishTabGesture(true); openCategoryActions(button.dataset.tab); }
 });
 
 /* ───────── Basılı tutma / dokunma ───────── */
@@ -706,6 +853,7 @@ panel.addEventListener('click', (e) => {
     setMark(id, date, getMark(id, date) ? '' : 'g');
     return;
   }
+  if (e.target.closest('[data-monthly]')) { monthlyViewMode = !monthlyViewMode; render(); return; }
   if (e.target.closest('[data-reorder]')) { reorderMode = !reorderMode; render(); return; }
   const mv = e.target.closest('[data-move]');
   if (mv) {
@@ -857,13 +1005,6 @@ function openMenu(cell) {
   if (menu.matches(':popover-open')) menu.hidePopover();
   menu.showPopover();
 
-  const r = cell.getBoundingClientRect();
-  const w = menu.offsetWidth, hgt = menu.offsetHeight;
-  let left = Math.min(Math.max(8, r.left + r.width / 2 - w / 2), innerWidth - w - 8);
-  let top = r.bottom + 8;
-  if (top + hgt > innerHeight - 8) top = Math.max(8, r.top - hgt - 8);
-  menu.style.left = `${left}px`;
-  menu.style.top = `${top}px`;
   menu.querySelector('button')?.focus({ preventScroll: true });
 }
 function closeMenu() {
@@ -892,11 +1033,154 @@ const deleteBtn = $('#deleteBtn');
 let editing = null;
 let currentGoalType = 'none';
 let editorSubtasks = [];
+let editorEmoji = '';
+const HABIT_EMOJIS = ['🍳', '🥗', '🍊', '🍎', '🥑', '💧', '☕', '🔥', '💪', '🏋️', '🏃', '🚴', '🧘', '🏊', '🚶', '⚽', '🌿', '🪥', '🧴', '🚿', '😴', '💊', '📖', '✍️', '🎓', '💻', '🎨', '🎵', '🌙', '🤲', '🕌', '❤️', '🛡️', '🎯', '⭐', '✅'];
+
+const categoryEditor = $('#categoryEditor');
+let categoryEmoji = '📁';
+let categoryColor = CUSTOM_TAB_COLORS[0].color;
+let editingCategoryId = null;
+function renderCategoryChoices() {
+  $('#categoryEmojiPreview').textContent = categoryEmoji;
+  $('#categoryEmojiChoices').innerHTML = ['📁', ...HABIT_EMOJIS].map(emoji => `<button type="button" class="emoji-picker-option" data-category-emoji="${emoji}" aria-label="Sekme emojisi: ${emoji}" aria-pressed="${categoryEmoji === emoji}">${emoji}</button>`).join('');
+  $('#categoryColors').innerHTML = CUSTOM_TAB_COLORS.map(option => `<button type="button" class="category-color-option" data-category-color="${option.color}" aria-label="Renk: ${option.label}" aria-pressed="${categoryColor === option.color}" style="--swatch:${option.color};--swatch-ink:${getAccentInk(option.color)}"><span>${categoryColor === option.color ? '✓' : ''}</span></button>`).join('');
+  categoryEditor.style.setProperty('--category-color', categoryColor);
+  categoryEditor.style.setProperty('--category-ink', getAccentInk(categoryColor));
+}
+function openCategoryEditor(id = null) {
+  const tab = id ? getTabs().find(tab => tab.id === id) : null;
+  editingCategoryId = tab?.id || null;
+  $('#categoryForm').reset();
+  categoryEmoji = tab?.emoji || '📁'; categoryColor = tab?.color || CUSTOM_TAB_COLORS[0].color;
+  $('#categoryName').value = tab?.name || '';
+  $('#categoryEditorTitle').textContent = tab ? 'Sekmeyi düzenle' : 'Yeni sekme';
+  $('#categoryForm .category-create-btn').textContent = tab ? 'Değişiklikleri kaydet' : 'Sekme ekle';
+  $('#categoryEmojiChoices').hidden = true;
+  $('#categoryEmojiBtn').setAttribute('aria-expanded', 'false');
+  $('#categoryError').hidden = true;
+  renderCategoryChoices(); categoryEditor.showModal(); $('#categoryName').focus();
+}
+$('#categoryEmojiBtn').addEventListener('click', () => {
+  const open = $('#categoryEmojiChoices').hidden;
+  $('#categoryEmojiChoices').hidden = !open;
+  $('#categoryEmojiBtn').setAttribute('aria-expanded', String(open));
+});
+$('#categoryEmojiChoices').addEventListener('click', event => {
+  const button = event.target.closest('[data-category-emoji]');
+  if (!button) return;
+  categoryEmoji = button.dataset.categoryEmoji;
+  renderCategoryChoices();
+  $('#categoryEmojiChoices').hidden = true;
+  $('#categoryEmojiBtn').setAttribute('aria-expanded', 'false');
+});
+$('#categoryColors').addEventListener('click', event => {
+  const button = event.target.closest('[data-category-color]');
+  if (!button) return;
+  categoryColor = button.dataset.categoryColor; renderCategoryChoices();
+});
+$('#categoryName').addEventListener('input', () => { $('#categoryError').hidden = true; });
+$('#categoryForm').addEventListener('submit', event => {
+  event.preventDefault();
+  const name = $('#categoryName').value.trim();
+  const duplicate = getTabs().some(tab => tab.id !== editingCategoryId && tab.name.trim().toLocaleLowerCase('tr-TR') === name.toLocaleLowerCase('tr-TR'));
+  if (!name || duplicate) {
+    $('#categoryError').textContent = !name ? 'Lütfen bir sekme adı gir.' : 'Bu isimde bir sekme zaten var.';
+    $('#categoryError').hidden = false; return;
+  }
+  const tab = { id: editingCategoryId || `custom-${uid()}`, name, emoji: categoryEmoji, color: categoryColor };
+  if (editingCategoryId) {
+    if (editingCategoryId.startsWith('custom-')) state.customTabs = state.customTabs.map(item => item.id === editingCategoryId ? tab : item);
+    else state.tabEdits = { ...state.tabEdits, [editingCategoryId]: { name, emoji: categoryEmoji, color: categoryColor } };
+  } else {
+    state.customTabs = [...(state.customTabs || []), tab];
+    state.tab = tab.id;
+  }
+  state.section = 'rutin'; profileOpen = false; reorderMode = false;
+  save(); categoryEditor.close(); render();
+  $(`#tab-${tab.id}`)?.scrollIntoView({ inline: 'center', block: 'nearest' });
+});
+$('#cancelCategoryBtn').addEventListener('click', () => categoryEditor.close());
+categoryEditor.addEventListener('click', event => { if (event.target === categoryEditor) categoryEditor.close(); });
+
+const categoryActions = $('#categoryActions');
+let categoryActionId = null;
+function openCategoryActions(id) {
+  const tab = getTabs().find(tab => tab.id === id);
+  if (!tab) return;
+  categoryActionId = id;
+  const count = state.habits.filter(habit => habit.tab === id).length;
+  $('#categoryActionsTitle').textContent = `${tab.emoji} ${tab.name}`;
+  $('#categoryDeleteCount').textContent = `${count} madde ve takip kayıtları`;
+  $('#categoryDeleteDescription').textContent = `“${tab.name}” sekmesi, içindeki ${count} madde ve bu maddelerin takip kayıtları silinecek. Bu işlem geri alınamaz.`;
+  $('#categoryDeleteMenu').hidden = false;
+  $('#categoryDeleteConfirmation').hidden = true;
+  $('#categoryDeleteOption').disabled = getTabs().length <= 1;
+  $('#categoryLastTabNote').hidden = getTabs().length > 1;
+  if (!categoryActions.open) categoryActions.showModal();
+}
+$('#categoryEditOption').addEventListener('click', () => {
+  const id = categoryActionId;
+  categoryActions.close();
+  openCategoryEditor(id);
+});
+$('#categoryDeleteOption').addEventListener('click', () => {
+  $('#categoryDeleteMenu').hidden = true;
+  $('#categoryDeleteConfirmation').hidden = false;
+});
+categoryActions.querySelectorAll('[data-close-category-actions]').forEach(button => button.addEventListener('click', () => categoryActions.close()));
+categoryActions.addEventListener('click', event => { if (event.target === categoryActions) categoryActions.close(); });
+categoryActions.addEventListener('close', () => { categoryActionId = null; });
+$('#categoryDeleteConfirm').addEventListener('click', () => {
+  const id = categoryActionId;
+  if (getTabs().length <= 1 || !getTabs().some(tab => tab.id === id)) return;
+  const ids = new Set(state.habits.filter(habit => habit.tab === id).map(habit => habit.id));
+  state.tabOrder = getTabs().map(tab => tab.id).filter(tabId => tabId !== id);
+  state.customTabs = state.customTabs.filter(tab => tab.id !== id);
+  if (TABS.some(tab => tab.id === id)) state.deletedTabs = [...new Set([...(state.deletedTabs || []), id])];
+  state.habits = state.habits.filter(habit => habit.tab !== id);
+  state.marks = Object.fromEntries(Object.entries(state.marks).filter(([habitId]) => !ids.has(habitId)));
+  state.progress = Object.fromEntries(Object.entries(state.progress || {}).filter(([habitId]) => !ids.has(habitId)));
+  if (state.tab === id) state.tab = getTabs()[0].id;
+  reorderMode = false;
+  save(); categoryActions.close(); render();
+});
+
+function renderEditorEmoji() {
+  $('#habitEmojiPreview').textContent = editorEmoji || habitEmoji({ name: form.elements.name.value, tab: editing?.tab || state.tab });
+  $('#emojiChoices').innerHTML = HABIT_EMOJIS.map(emoji => `<button type="button" class="emoji-picker-option" data-emoji="${emoji}" aria-label="Emoji: ${emoji}" aria-pressed="${editorEmoji === emoji}">${emoji}</button>`).join('');
+}
+
+function closeEmojiPicker() {
+  $('#emojiPicker').hidden = true;
+  $('#habitEmojiBtn').setAttribute('aria-expanded', 'false');
+}
+
+$('#habitEmojiBtn').addEventListener('click', () => {
+  const open = $('#emojiPicker').hidden;
+  $('#emojiPicker').hidden = !open;
+  $('#habitEmojiBtn').setAttribute('aria-expanded', String(open));
+});
+$('#emojiChoices').addEventListener('click', (event) => {
+  const option = event.target.closest('[data-emoji]');
+  if (!option) return;
+  editorEmoji = option.dataset.emoji;
+  renderEditorEmoji();
+  closeEmojiPicker();
+  $('#habitEmojiBtn').focus();
+});
+$('#autoEmojiBtn').addEventListener('click', () => {
+  editorEmoji = '';
+  renderEditorEmoji();
+  closeEmojiPicker();
+  $('#habitEmojiBtn').focus();
+});
+form.elements.name.addEventListener('input', renderEditorEmoji);
 
 function setEditorGoalType(type) {
   currentGoalType = type;
   $('#goalTypeRow').querySelectorAll('[data-goal-type]').forEach((b) => {
     b.classList.toggle('active', b.dataset.goalType === type);
+    b.setAttribute('aria-pressed', String(b.dataset.goalType === type));
   });
   $('#goalTimerBox').hidden = type !== 'timer';
   $('#goalRepsBox').hidden = type !== 'reps';
@@ -966,6 +1250,9 @@ function openEditor(habit) {
   $('#editorTitle').textContent = habit ? 'Maddeyi düzenle' : 'Yeni madde';
   form.elements.name.value = habit?.name ?? '';
   form.elements.detail.value = habit?.detail ?? '';
+  editorEmoji = habit?.emoji || '';
+  closeEmojiPicker();
+  renderEditorEmoji();
   const g = habit?.goal;
   if (g && g.type !== 'none' && g.target > 0) {
     setEditorGoalType(g.type);
@@ -1030,10 +1317,11 @@ form.addEventListener('submit', (e) => {
   if (editing) {
     editing.name = name;
     editing.detail = detail;
+    editing.emoji = editorEmoji || undefined;
     editing.goal = goal;
     editing.subtasks = [...editorSubtasks];
   } else {
-    state.habits.push({ id: uid(), tab: state.tab, name, detail, goal, subtasks: [...editorSubtasks] });
+    state.habits.push({ id: uid(), tab: state.tab, name, detail, emoji: editorEmoji || undefined, goal, subtasks: [...editorSubtasks] });
   }
   save();
   editor.close();
@@ -1415,7 +1703,7 @@ function renderTaskDatePickerBody() {
     <div class="dt-box">
       <div class="dt-time-head">
         <b style="font-size:.9rem">🕒 Saat Seçimi</b>
-        <button type="button" class="chip ${hasTime ? 'active' : ''}" data-dt-toggle-time style="border:1px solid ${hasTime ? '#FF0000' : '#950101'}">
+        <button type="button" class="chip ${hasTime ? 'active' : ''}" data-dt-toggle-time style="border:1px solid ${hasTime ? '#767676' : '#484848'}">
           ${hasTime ? '✓ Saat Açık' : 'Saat Kapalı'}
         </button>
       </div>
@@ -1673,13 +1961,18 @@ $('#importFile').addEventListener('change', async (e) => {
     const s = JSON.parse(await file.text());
     if ((!Array.isArray(s.habits) && !Array.isArray(s.tasks)) || (s.marks !== undefined && typeof s.marks !== 'object')) throw new Error('format');
     if (!confirm('Mevcut verilerin yerine yedek yüklensin mi?')) return;
+    const importedCustomTabs = normalizeCustomTabs(s.customTabs);
     Object.assign(state, {
       section: s.section === 'gorevler' || s.section === 'rutin' ? s.section : (state.section || 'rutin'),
       habits: Array.isArray(s.habits) ? s.habits : (state.habits || []),
       marks: s.marks && typeof s.marks === 'object' ? s.marks : (state.marks || {}),
       progress: s.progress && typeof s.progress === 'object' ? s.progress : {},
       tasks: Array.isArray(s.tasks) ? s.tasks : [],
-      tab: TABS.some((t) => t.id === s.tab) ? s.tab : TABS[0].id,
+      customTabs: importedCustomTabs,
+      tabOrder: Array.isArray(s.tabOrder) ? s.tabOrder : [],
+      deletedTabs: Array.isArray(s.deletedTabs) ? s.deletedTabs.filter(id => TABS.some(tab => tab.id === id)) : [],
+      tabEdits: s.tabEdits && typeof s.tabEdits === 'object' ? s.tabEdits : {},
+      tab: [...TABS, ...importedCustomTabs].some((t) => t.id === s.tab) ? s.tab : TABS[0].id,
       profile: {
         firstName: typeof s.profile?.firstName === 'string' ? s.profile.firstName : (state.profile?.firstName || ''),
         lastName: typeof s.profile?.lastName === 'string' ? s.profile.lastName : (state.profile?.lastName || ''),
@@ -1687,6 +1980,7 @@ $('#importFile').addEventListener('change', async (e) => {
         lastRestoreAt: nowStampTR(),
       },
     });
+    if (!getTabs().some(tab => tab.id === state.tab)) state.tab = getTabs()[0].id;
     save();
     render();
   } catch {

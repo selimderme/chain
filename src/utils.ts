@@ -66,6 +66,13 @@ export const formatMonthTR = (y: number, m: number): string =>
 export const formatDayTR = (date: Date): string =>
   `${date.getDate()} ${TR_MONTHS[date.getMonth()]} ${TR_WEEKDAYS[date.getDay()]}`;
 
+/** Keep visible days plus a small buffer mounted in the horizontal month strip. */
+export function visibleDayRange(count: number, offset: number, step: number, viewport: number): [number, number] {
+  const first = Math.max(0, Math.min(count - 1, Math.floor(offset / step)));
+  const last = Math.min(count, Math.ceil((Math.max(0, offset) + viewport) / step));
+  return [Math.max(0, first - 2), Math.min(count, last + 2)];
+}
+
 export function calculateStreaks(
   habitMarks: Record<string, MarkType> | undefined,
   todayKey: string

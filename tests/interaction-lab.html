@@ -1,0 +1,40 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Yerel etkileşim ölçümü</title>
+<style>
+  body { margin: 0; background: #171717; color: #eee; font: 14px system-ui; display: flex; gap: 16px; }
+  iframe { width: 385px; height: 480px; border: 0; flex: none; }
+  main { padding: 12px; min-width: 420px; }
+  td, th { padding: 5px 8px; text-align: left; border-bottom: 1px solid #444; }
+</style>
+<iframe title="Test uygulaması" src="/"></iframe>
+<main><h1>Yerel etkileşim ölçümü</h1><p>Tıklama → DOM güncellemesi → sonraki çizim. Süreler milisaniyedir.</p>
+<table><thead><tr><th>Kontrol</th><th>DOM</th><th>Çizim</th><th>Uzun işlem</th></tr></thead><tbody id="results"></tbody></table></main>
+<script>
+const frame = document.querySelector('iframe');
+frame.addEventListener('load', () => {
+  const win = frame.contentWindow, doc = frame.contentDocument;
+  let pending = null;
+  const longTasks = [];
+  const observer = new win.PerformanceObserver(list => longTasks.push(...list.getEntries()));
+  observer.observe({type: 'longtask', buffered: true});
+  doc.addEventListener('click', event => {
+    const el = event.target.closest('[aria-label], [role="button"], [tabindex="0"]') || event.target;
+    pending = {start: win.performance.now(), label: el.getAttribute('aria-label') || el.textContent.trim().slice(0, 55)};
+  }, true);
+  new win.MutationObserver(() => {
+    if (!pending) return;
+    const current = pending;
+    pending = null;
+    const commit = win.performance.now();
+    win.requestAnimationFrame(() => win.requestAnimationFrame(() => {
+      const end = win.performance.now();
+      const row = document.createElement('tr');
+      for (const text of [current.label, (commit-current.start).toFixed(1), (end-current.start).toFixed(1), longTasks.filter(t=>t.startTime+t.duration>=current.start&&t.startTime<=end).map(t=>t.duration.toFixed(1)).join(', ') || '—']) {
+        const cell = document.createElement('td'); cell.textContent=text; row.append(cell);
+      }
+      document.querySelector('#results').append(row);
+    }));
+  }).observe(doc.documentElement, {subtree: true, childList: true, characterData: true, attributes: true});
+});
+</script>

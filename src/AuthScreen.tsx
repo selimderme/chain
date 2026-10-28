@@ -1,4 +1,5 @@
-import React, { useState } from 'react';
+import { InstantButton as TouchableOpacity } from './InstantButton';
+import React, { useRef, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -7,13 +8,13 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
 import { AuthUser } from './constants';
+import Svg, { Circle, Path } from 'react-native-svg';
 import {
   continueAsGuestUser,
   sendPasswordResetEmail,
@@ -30,7 +31,7 @@ interface AuthScreenProps {
   initialDefaultLastName?: string;
 }
 
-type AuthScreenMode = 'welcome' | 'google' | 'apple' | 'email';
+type AuthScreenMode = 'google' | 'apple' | 'email';
 type EmailTabMode = 'login' | 'register';
 
 export default function AuthScreen({
@@ -39,8 +40,8 @@ export default function AuthScreen({
   initialDefaultFirstName = '',
   initialDefaultLastName = '',
 }: AuthScreenProps) {
-  const [mode, setMode] = useState<AuthScreenMode>('welcome');
-  const [emailTab, setEmailTab] = useState<EmailTabMode>('register');
+  const [mode, setMode] = useState<AuthScreenMode>('email');
+  const [emailTab, setEmailTab] = useState<EmailTabMode>('login');
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -79,20 +80,11 @@ export default function AuthScreen({
   const handleGoogleSubmit = async () => {
     try {
       resetMessages();
-      const trimmedEmail = email.trim();
-      if (!trimmedEmail || !trimmedEmail.includes('@')) {
-        setErrorMsg('Lütfen Google e-posta adresinizi girin (örn: adiniz@gmail.com).');
-        return;
-      }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => {}
       );
       setLoading(true);
-      const user = await signInWithGoogleAccount({
-        email: trimmedEmail,
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-      });
+      const user = await signInWithGoogleAccount();
       await onAuthenticated(user);
     } catch (err: any) {
       setErrorMsg(err?.message || 'Google ile giriş yapılırken bir sorun oluştu.');
@@ -104,20 +96,11 @@ export default function AuthScreen({
   const handleAppleSubmit = async () => {
     try {
       resetMessages();
-      const trimmedEmail = email.trim();
-      if (!trimmedEmail || !trimmedEmail.includes('@')) {
-        setErrorMsg('Lütfen Apple ID e-posta adresinizi girin (örn: adiniz@icloud.com).');
-        return;
-      }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
         () => {}
       );
       setLoading(true);
-      const user = await signInWithAppleAccount({
-        email: trimmedEmail,
-        firstName: firstName.trim(),
-        lastName: lastName.trim(),
-      });
+      const user = await signInWithAppleAccount();
       await onAuthenticated(user);
     } catch (err: any) {
       setErrorMsg(err?.message || 'Apple ile giriş yapılırken bir sorun oluştu.');
@@ -174,845 +157,164 @@ export default function AuthScreen({
     }
   };
 
+  const [showPassword, setShowPassword] = useState(false);
+  const [focusedField, setFocusedField] = useState<'email' | 'password' | null>(null);
+  const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const passwordRef = useRef<React.ComponentRef<typeof TextInput>>(null);
+  const provider = mode === 'google' || mode === 'apple';
+  const registering = !provider && emailTab === 'register';
+  const canSubmit = !loading && /.+@.+\..+/.test(email.trim()) &&
+    (provider || (password.length >= 6 && (!registering || !!firstName.trim())));
+  const submit = () => {
+    if (!canSubmit) return;
+    if (mode === 'google') return handleGoogleSubmit();
+    if (mode === 'apple') return handleAppleSubmit();
+    return handleEmailSubmit();
+  };
+  const changeMode = (next: AuthScreenMode, tab: EmailTabMode = 'login') => {
+    setEmailTab(tab); setShowPassword(false); handleSelectMode(next);
+    scrollRef.current?.scrollTo({ y: 0, animated: false });
+  };
+  const title = provider ? (mode === 'google' ? 'Google ile devam et' : 'Apple ile devam et')
+    : registering ? 'Hesap oluştur' : 'Giriş yap';
+
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom', 'left', 'right']}>
       <StatusBar style="light" />
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={{ flex: 1 }}
-      >
-        <ScrollView
-          contentContainerStyle={styles.scrollContent}
-          keyboardShouldPersistTaps="handled"
-          showsVerticalScrollIndicator={false}
-        >
-          {/* Üst Geri / Kapat Çubuğu */}
-          <View style={styles.topRow}>
-            {mode !== 'welcome' ? (
-              <TouchableOpacity
-                onPress={() => handleSelectMode('welcome')}
-                style={styles.backBtn}
-                activeOpacity={0.75}
-              >
-                <Text style={styles.backBtnText}>‹ Giriş Seçenekleri</Text>
+      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
+        <ScrollView ref={scrollRef} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
+          <View style={styles.content}>
+            <View style={styles.nav}>
+              {(onCancel || provider || registering) && (
+              <TouchableOpacity disabled={loading} accessibilityLabel={provider || registering ? 'Giriş sayfasına dön' : 'Giriş sayfasını kapat'}
+                onPress={() => provider || registering ? changeMode('email') : onCancel?.()} style={styles.back}>
+                <Svg width={22} height={22} viewBox="0 0 24 24" accessible={false}>
+                  <Path d="m14.5 5-7 7 7 7" fill="none" stroke="#EEF0F6" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" />
+                </Svg>
               </TouchableOpacity>
-            ) : (
-              <View />
-            )}
-
-            {onCancel && (
-              <TouchableOpacity
-                onPress={onCancel}
-                style={styles.closeBtn}
-                activeOpacity={0.75}
-              >
-                <Text style={styles.closeBtnText}>✕ Kapat</Text>
-              </TouchableOpacity>
-            )}
-          </View>
-
-          {/* Logo ve Karşılama Başlığı */}
-          <View style={styles.heroHeader}>
-            <View style={styles.logoCircle}>
-              <Text style={styles.logoEmoji}>🗓️</Text>
-            </View>
-            <Text style={styles.appTitle}>Günlük Plan</Text>
-            <Text style={styles.appSubtitle}>
-              Alışkanlıklarını takip et, görevlerini planla ve tüm verilerini
-              bulutta güvende tut.
-            </Text>
-
-            <View style={styles.featurePillsRow}>
-              <View style={styles.featurePill}>
-                <Text style={styles.featurePillText}>⚡ İnternetsiz Çalışır</Text>
-              </View>
-              <View style={styles.featurePill}>
-                <Text style={styles.featurePillText}>☁️ Otomatik Bulut Yedek</Text>
-              </View>
-            </View>
-          </View>
-
-          {/* Hata / Bilgi Mesajları */}
-          {Boolean(errorMsg) && (
-            <View style={styles.errorBanner}>
-              <Text style={styles.errorBannerText}>⚠️ {errorMsg}</Text>
-            </View>
-          )}
-          {Boolean(infoMsg) && (
-            <View style={styles.infoBanner}>
-              <Text style={styles.infoBannerText}>ℹ️ {infoMsg}</Text>
-            </View>
-          )}
-
-          {/* EKRAN 1: 4 ANA GİRİŞ SEÇENEĞİ */}
-          {mode === 'welcome' && (
-            <View style={styles.optionsCard}>
-              <Text style={styles.sectionTitle}>Nasıl devam etmek istersiniz?</Text>
-
-              {/* 1. Google ile Devam Et */}
-              <TouchableOpacity
-                onPress={() => handleSelectMode('google')}
-                disabled={loading}
-                activeOpacity={0.85}
-                style={styles.googleBtn}
-              >
-                <View style={styles.providerIconCircleGoogle}>
-                  <Text style={styles.googleIconText}>G</Text>
-                </View>
-                <View style={styles.providerBtnTextCol}>
-                  <Text style={styles.googleBtnTitle}>Google ile Devam Et</Text>
-                  <Text style={styles.googleBtnSub}>
-                    Google hesabına otomatik yedekle ve senkronize et
-                  </Text>
-                </View>
-                <Text style={styles.googleChevron}>›</Text>
-              </TouchableOpacity>
-
-              {/* 2. Apple ile Giriş Yap */}
-              <TouchableOpacity
-                onPress={() => handleSelectMode('apple')}
-                disabled={loading}
-                activeOpacity={0.85}
-                style={styles.appleBtn}
-              >
-                <View style={styles.providerIconCircleApple}>
-                  <Text style={styles.appleIconText}></Text>
-                </View>
-                <View style={styles.providerBtnTextCol}>
-                  <Text style={styles.appleBtnTitle}>Apple ile Giriş Yap</Text>
-                  <Text style={styles.appleBtnSub}>
-                    Apple ID ile hızlı giriş ve bulut yedekleme
-                  </Text>
-                </View>
-                <Text style={styles.appleChevron}>›</Text>
-              </TouchableOpacity>
-
-              {/* 3. E-posta ve Şifre ile Kayıt Ol / Giriş Yap */}
-              <TouchableOpacity
-                onPress={() => {
-                  setEmailTab('register');
-                  handleSelectMode('email');
-                }}
-                disabled={loading}
-                activeOpacity={0.85}
-                style={styles.emailBtn}
-              >
-                <View style={styles.providerIconCircleEmail}>
-                  <Text style={styles.emailIconText}>✉️</Text>
-                </View>
-                <View style={styles.providerBtnTextCol}>
-                  <Text style={styles.emailBtnTitle}>
-                    E-posta ve Şifre ile Kayıt Ol / Giriş Yap
-                  </Text>
-                  <Text style={styles.emailBtnSub}>
-                    E-posta hesabınızla bulut senkronizasyonu açın
-                  </Text>
-                </View>
-                <Text style={styles.emailChevron}>›</Text>
-              </TouchableOpacity>
-
-              <View style={styles.dividerRow}>
-                <View style={styles.dividerLine} />
-                <Text style={styles.dividerText}>veya</Text>
-                <View style={styles.dividerLine} />
-              </View>
-
-              {/* 4. Üye Olmadan Devam Et (Misafir Modu) */}
-              <TouchableOpacity
-                onPress={handleGuestContinue}
-                disabled={loading}
-                activeOpacity={0.82}
-                style={styles.guestBtn}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#e2e8f0" />
-                ) : (
-                  <>
-                    <Text style={styles.guestBtnTitle}>
-                      👤 Üye Olmadan Devam Et (Misafir Modu)
-                    </Text>
-                    <Text style={styles.guestBtnSub}>
-                      Verileriniz cihazınızda (AsyncStorage) saklanır. İstediğiniz
-                      zaman Profil sayfasından Google/Apple hesabınızı bağlayabilirsiniz.
-                    </Text>
-                  </>
-                )}
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* EKRAN 2: GOOGLE İLE DEVAM ET */}
-          {mode === 'google' && (
-            <View style={styles.formCard}>
-              <View style={styles.formHeaderRow}>
-                <View style={styles.providerIconCircleGoogle}>
-                  <Text style={styles.googleIconText}>G</Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.formTitle}>Google ile Giriş Yap</Text>
-                  <Text style={styles.formSubtitle}>
-                    Bulut Veritabanı + Çevrimdışı Öncelikli Senkronizasyon
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.syncExplainBox}>
-                <Text style={styles.syncExplainText}>
-                  • Verileriniz önce telefonunuza kaydedilir, internet yokken de
-                  kesintisiz çalışır.{'\n'}
-                  • İnternet olduğunda arka planda otomatik olarak Google
-                  hesabınıza bağlı bulut veritabanına yedeklenir.{'\n'}
-                  • Yeni bir cihazda aynı Google hesabıyla giriş yaptığınızda
-                  yedeğiniz otomatik olarak indirilir.
-                </Text>
-              </View>
-
-              <Text style={styles.inputLabel}>Google E-posta Adresiniz *</Text>
-              <TextInput
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholder="ornek@gmail.com"
-                placeholderTextColor="#64748b"
-                style={styles.textInput}
-              />
-
-              <View style={styles.nameRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.inputLabel}>Ad (İsteğe bağlı)</Text>
-                  <TextInput
-                    value={firstName}
-                    onChangeText={setFirstName}
-                    placeholder="Adınız"
-                    placeholderTextColor="#64748b"
-                    style={styles.textInput}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.inputLabel}>Soyad (İsteğe bağlı)</Text>
-                  <TextInput
-                    value={lastName}
-                    onChangeText={setLastName}
-                    placeholder="Soyadınız"
-                    placeholderTextColor="#64748b"
-                    style={styles.textInput}
-                  />
-                </View>
-              </View>
-
-              <TouchableOpacity
-                onPress={handleGoogleSubmit}
-                disabled={loading}
-                activeOpacity={0.85}
-                style={styles.submitPrimaryBtn}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#ffffff" />
-                ) : (
-                  <Text style={styles.submitPrimaryBtnText}>
-                    Google Hesabımla Bağlan ve Eşitle
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* EKRAN 3: APPLE İLE GİRİŞ YAP */}
-          {mode === 'apple' && (
-            <View style={styles.formCard}>
-              <View style={styles.formHeaderRow}>
-                <View style={styles.providerIconCircleApple}>
-                  <Text style={styles.appleIconText}></Text>
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.formTitle}>Apple ile Giriş Yap</Text>
-                  <Text style={styles.formSubtitle}>
-                    Apple Kimliği ile Bulut Yedekleme ve Eşitleme
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.syncExplainBox}>
-                <Text style={styles.syncExplainText}>
-                  • Apple ID hesabınızla giriş yaptığınızda tüm rutinleriniz ve
-                  görevleriniz bulutta hesabınıza özel olarak saklanır ve yeni
-                  cihazınıza otomatik indirilir.
-                </Text>
-              </View>
-
-              <Text style={styles.inputLabel}>Apple ID (E-posta) *</Text>
-              <TextInput
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholder="ornek@icloud.com"
-                placeholderTextColor="#64748b"
-                style={styles.textInput}
-              />
-
-              <View style={styles.nameRow}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.inputLabel}>Ad (İsteğe bağlı)</Text>
-                  <TextInput
-                    value={firstName}
-                    onChangeText={setFirstName}
-                    placeholder="Adınız"
-                    placeholderTextColor="#64748b"
-                    style={styles.textInput}
-                  />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.inputLabel}>Soyad (İsteğe bağlı)</Text>
-                  <TextInput
-                    value={lastName}
-                    onChangeText={setLastName}
-                    placeholder="Soyadınız"
-                    placeholderTextColor="#64748b"
-                    style={styles.textInput}
-                  />
-                </View>
-              </View>
-
-              <TouchableOpacity
-                onPress={handleAppleSubmit}
-                disabled={loading}
-                activeOpacity={0.85}
-                style={[styles.submitPrimaryBtn, { backgroundColor: '#f8fafc' }]}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#0f172a" />
-                ) : (
-                  <Text
-                    style={[styles.submitPrimaryBtnText, { color: '#0f172a' }]}
-                  >
-                     Apple ile Devam Et
-                  </Text>
-                )}
-              </TouchableOpacity>
-            </View>
-          )}
-
-          {/* EKRAN 4: E-POSTA VE ŞİFRE İLE KAYIT OL / GİRİŞ YAP */}
-          {mode === 'email' && (
-            <View style={styles.formCard}>
-              <View style={styles.emailTabSwitch}>
-                <TouchableOpacity
-                  onPress={() => {
-                    resetMessages();
-                    setEmailTab('register');
-                  }}
-                  style={[
-                    styles.emailTabBtn,
-                    emailTab === 'register' && styles.emailTabBtnActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.emailTabBtnText,
-                      emailTab === 'register' && styles.emailTabBtnTextActive,
-                    ]}
-                  >
-                    Kayıt Ol
-                  </Text>
-                </TouchableOpacity>
-
-                <TouchableOpacity
-                  onPress={() => {
-                    resetMessages();
-                    setEmailTab('login');
-                  }}
-                  style={[
-                    styles.emailTabBtn,
-                    emailTab === 'login' && styles.emailTabBtnActive,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.emailTabBtnText,
-                      emailTab === 'login' && styles.emailTabBtnTextActive,
-                    ]}
-                  >
-                    Giriş Yap
-                  </Text>
-                </TouchableOpacity>
-              </View>
-
-              {emailTab === 'register' && (
-                <View style={styles.nameRow}>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.inputLabel}>Ad *</Text>
-                    <TextInput
-                      value={firstName}
-                      onChangeText={setFirstName}
-                      placeholder="Adınız"
-                      placeholderTextColor="#64748b"
-                      style={styles.textInput}
-                    />
-                  </View>
-                  <View style={{ flex: 1 }}>
-                    <Text style={styles.inputLabel}>Soyad</Text>
-                    <TextInput
-                      value={lastName}
-                      onChangeText={setLastName}
-                      placeholder="Soyadınız"
-                      placeholderTextColor="#64748b"
-                      style={styles.textInput}
-                    />
-                  </View>
-                </View>
-              )}
-
-              <Text style={styles.inputLabel}>E-posta Adresi *</Text>
-              <TextInput
-                value={email}
-                onChangeText={setEmail}
-                keyboardType="email-address"
-                autoCapitalize="none"
-                autoCorrect={false}
-                placeholder="ornek@eposta.com"
-                placeholderTextColor="#64748b"
-                style={styles.textInput}
-              />
-
-              <Text style={styles.inputLabel}>Şifre *</Text>
-              <TextInput
-                value={password}
-                onChangeText={setPassword}
-                secureTextEntry
-                placeholder={
-                  emailTab === 'register'
-                    ? 'En az 6 karakterli şifre'
-                    : 'Şifrenizi girin'
-                }
-                placeholderTextColor="#64748b"
-                style={styles.textInput}
-              />
-
-              <TouchableOpacity
-                onPress={handleEmailSubmit}
-                disabled={loading}
-                activeOpacity={0.85}
-                style={styles.submitPrimaryBtn}
-              >
-                {loading ? (
-                  <ActivityIndicator color="#ffffff" />
-                ) : (
-                  <Text style={styles.submitPrimaryBtnText}>
-                    {emailTab === 'register'
-                      ? 'Hesap Oluştur ve Yedeklemeyi Başlat'
-                      : 'Giriş Yap ve Yedeğimi İndir'}
-                  </Text>
-                )}
-              </TouchableOpacity>
-
-              {emailTab === 'login' && (
-                <TouchableOpacity
-                  onPress={handleForgotPassword}
-                  disabled={loading}
-                  style={styles.forgotPassBtn}
-                >
-                  <Text style={styles.forgotPassText}>Şifremi Unuttum</Text>
-                </TouchableOpacity>
               )}
             </View>
-          )}
+            <Text accessibilityRole="header" style={styles.title}>{title}</Text>
+            {!!errorMsg && <View accessibilityRole="alert" style={styles.error}><Text style={styles.errorText}>{errorMsg}</Text></View>}
+            {!!infoMsg && <View accessibilityLiveRegion="polite" style={styles.info}><Text style={styles.infoText}>{infoMsg}</Text></View>}
+
+            {(registering || provider) && (
+              <View style={styles.nameRow}>
+                <View style={[styles.field, styles.flex]}>
+                  <Text style={styles.label}>{provider ? 'AD (İSTEĞE BAĞLI)' : 'AD'}</Text>
+                  <TextInput accessibilityLabel="Ad" editable={!loading} value={firstName} onChangeText={setFirstName} autoComplete="given-name" placeholder="Adın" placeholderTextColor="#9298A6" style={styles.input} />
+                </View>
+                <View style={[styles.field, styles.flex]}>
+                  <Text style={styles.label}>SOYAD</Text>
+                  <TextInput accessibilityLabel="Soyad" editable={!loading} value={lastName} onChangeText={setLastName} autoComplete="family-name" placeholder="Soyadın" placeholderTextColor="#9298A6" style={styles.input} />
+                </View>
+              </View>
+            )}
+
+            <View style={[styles.field, focusedField === 'email' && styles.fieldFocused]}>
+              <Text style={styles.label}>E-POSTA</Text>
+              <TextInput accessibilityLabel="E-posta" editable={!loading} value={email} onChangeText={setEmail} autoComplete="email" keyboardType="email-address" autoCapitalize="none" autoCorrect={false}
+                onFocus={() => setFocusedField('email')} onBlur={() => setFocusedField(null)}
+                style={styles.input} returnKeyType={provider ? 'done' : 'next'}
+                onSubmitEditing={() => provider ? submit() : passwordRef.current?.focus()} />
+            </View>
+            {!provider && (
+              <View style={[styles.field, focusedField === 'password' && styles.fieldFocused]}>
+                <Text style={styles.label}>ŞİFRE</Text>
+                <View style={styles.passwordRow}>
+                  <TextInput ref={passwordRef} accessibilityLabel="Şifre" editable={!loading} value={password} onChangeText={setPassword} secureTextEntry={!showPassword}
+                    onFocus={() => setFocusedField('password')} onBlur={() => setFocusedField(null)}
+                    autoCapitalize="none" autoCorrect={false} autoComplete={registering ? 'new-password' : 'current-password'}
+                    style={[styles.input, styles.flex]}
+                    returnKeyType="go" onSubmitEditing={submit} />
+                  <TouchableOpacity accessibilityLabel={showPassword ? 'Şifreyi gizle' : 'Şifreyi göster'} accessibilityState={{ selected: showPassword }} onPress={() => setShowPassword(value => !value)} style={styles.eye}>
+                    <Svg width={22} height={22} viewBox="0 0 24 24" accessible={false}>
+                      <Path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z" fill="none" stroke="#9298A6" strokeWidth={1.8} />
+                      <Circle cx={12} cy={12} r={3} stroke="#9298A6" strokeWidth={1.8} fill="none" />
+                      {showPassword && <Path d="M3 3 21 21" stroke="#9298A6" strokeWidth={1.8} strokeLinecap="round" />}
+                    </Svg>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            )}
+            {!provider && !registering && <TouchableOpacity disabled={loading} onPress={handleForgotPassword} style={styles.forgot}><Text style={styles.forgotText}>Şifreni mi unuttun?</Text></TouchableOpacity>}
+            <TouchableOpacity onPress={submit} disabled={!canSubmit} style={[styles.submit, !canSubmit && styles.submitDisabled]}>
+              {loading ? <ActivityIndicator color="#F0F1F6" /> : <Text style={[styles.submitText, !canSubmit && styles.submitTextDisabled]}>{provider ? 'Devam et' : registering ? 'Hesap oluştur' : 'Giriş yap'}</Text>}
+            </TouchableOpacity>
+            {!provider && <>
+              <Text style={styles.divider}>YA DA</Text>
+              <View style={styles.providers}>
+                {(['apple', 'google'] as const).map(value => (
+                  <TouchableOpacity key={value} disabled={loading} onPress={value === 'google' ? handleGoogleSubmit : handleAppleSubmit} style={styles.provider}>
+                    <ProviderIcon provider={value} />
+                    <Text style={styles.providerText}>{value === 'apple' ? 'Apple' : 'Google'} ile devam et</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+              <View style={styles.accountRow}>
+                <Text style={styles.secondaryText}>{registering ? 'Zaten hesabın var mı?' : 'Hesabın yok mu?'}</Text>
+                <TouchableOpacity disabled={loading} onPress={() => changeMode('email', registering ? 'login' : 'register')} style={styles.textLink}>
+                  <Text style={styles.linkText}>{registering ? 'Giriş yap' : 'Kayıt ol'}</Text>
+                </TouchableOpacity>
+              </View>
+              <TouchableOpacity disabled={loading} onPress={handleGuestContinue} style={styles.guest}>
+                <Text style={styles.secondaryText}>Üye olmadan devam et</Text>
+              </TouchableOpacity>
+            </>}
+          </View>
         </ScrollView>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
 
+function ProviderIcon({ provider }: { provider: 'google' | 'apple' }) {
+  return provider === 'apple' ? (
+    <Svg width={23} height={23} viewBox="0 0 24 24" accessible={false}>
+      <Path fill="#F0F1F6" d="M17.1 12.5c0-2 1.6-3 1.7-3.1-1-1.5-2.5-1.7-3-1.7-1.3-.1-2.5.8-3.2.8-.6 0-1.6-.8-2.7-.8-1.4 0-2.7.8-3.4 2-1.4 2.5-.4 6.3 1 8.3.7 1 1.5 2.1 2.5 2 1-.1 1.4-.7 2.7-.7 1.2 0 1.6.7 2.7.7s1.8-1 2.5-2c.8-1.1 1.2-2.2 1.2-2.3-.1 0-2-.8-2-3.2ZM15 6.4c.6-.8 1.1-1.9 1-3-.9 0-2 .6-2.7 1.4-.6.7-1.2 1.8-1 2.9 1 .1 2.1-.5 2.7-1.3Z" />
+    </Svg>
+  ) : (
+    <Svg width={22} height={22} viewBox="0 0 24 24" accessible={false}>
+      <Path fill="#4285F4" d="M22 12.2c0-.7-.1-1.4-.2-2.2H12v4h5.6c-.3 1.3-1 2.3-2.1 3v2.5H19c2-1.8 3-4.3 3-7.3Z" />
+      <Path fill="#34A853" d="M12 22c2.8 0 5.2-.9 7-2.5L15.5 17c-1 .6-2.1 1-3.5 1-2.7 0-5-1.8-5.8-4.2H2.6v2.7C4.3 19.8 7.9 22 12 22Z" />
+      <Path fill="#FBBC05" d="M6.2 13.8A6 6 0 0 1 6 12c0-.6.1-1.2.2-1.8V7.5H2.6A10 10 0 0 0 2 12c0 1.6.4 3.1 1.1 4.5l3.1-2.7Z" />
+      <Path fill="#EA4335" d="M12 6c1.5 0 2.9.5 4 1.6l3-3A10 10 0 0 0 12 2C7.9 2 4.3 4.2 2.6 7.5l3.6 2.7A6 6 0 0 1 12 6Z" />
+    </Svg>
+  );
+}
+
 const styles = StyleSheet.create({
-  safeArea: {
-    flex: 1,
-    backgroundColor: '#0B0F19',
-  },
-  scrollContent: {
-    paddingHorizontal: 20,
-    paddingTop: 12,
-    paddingBottom: 36,
-  },
-  topRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    minHeight: 38,
-    marginBottom: 8,
-  },
-  backBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 10,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.07)',
-  },
-  backBtnText: {
-    color: '#e2e8f0',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  closeBtn: {
-    paddingVertical: 6,
-    paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  closeBtnText: {
-    color: '#cbd5e1',
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  heroHeader: {
-    alignItems: 'center',
-    marginBottom: 22,
-  },
-  logoCircle: {
-    width: 72,
-    height: 72,
-    borderRadius: 22,
-    backgroundColor: 'rgba(249, 115, 22, 0.16)',
-    borderWidth: 1.5,
-    borderColor: 'rgba(249, 115, 22, 0.45)',
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 12,
-  },
-  logoEmoji: {
-    fontSize: 36,
-  },
-  appTitle: {
-    fontSize: 28,
-    fontWeight: '800',
-    color: '#f8fafc',
-    marginBottom: 6,
-  },
-  appSubtitle: {
-    fontSize: 14,
-    lineHeight: 20,
-    color: '#94a3b8',
-    textAlign: 'center',
-    paddingHorizontal: 10,
-    marginBottom: 14,
-  },
-  featurePillsRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 8,
-    justifyContent: 'center',
-  },
-  featurePill: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderRadius: 999,
-    backgroundColor: 'rgba(59, 130, 246, 0.14)',
-    borderWidth: 1,
-    borderColor: 'rgba(59, 130, 246, 0.32)',
-  },
-  featurePillText: {
-    color: '#93c5fd',
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  errorBanner: {
-    backgroundColor: 'rgba(239, 68, 68, 0.15)',
-    borderWidth: 1,
-    borderColor: '#ef4444',
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 16,
-  },
-  errorBannerText: {
-    color: '#fca5a5',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  infoBanner: {
-    backgroundColor: 'rgba(59, 130, 246, 0.15)',
-    borderWidth: 1,
-    borderColor: '#3b82f6',
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 16,
-  },
-  infoBannerText: {
-    color: '#bfdbfe',
-    fontSize: 13,
-    fontWeight: '600',
-  },
-  optionsCard: {
-    backgroundColor: '#131B2E',
-    borderRadius: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.08)',
-    gap: 12,
-  },
-  sectionTitle: {
-    color: '#f1f5f9',
-    fontSize: 16,
-    fontWeight: '700',
-    marginBottom: 4,
-    textAlign: 'center',
-  },
-  googleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#ffffff',
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    gap: 12,
-  },
-  providerIconCircleGoogle: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: '#f1f5f9',
-    alignItems: 'center',
-    justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: '#e2e8f0',
-  },
-  googleIconText: {
-    fontSize: 20,
-    fontWeight: '900',
-    color: '#ea4335',
-  },
-  providerBtnTextCol: {
-    flex: 1,
-  },
-  googleBtnTitle: {
-    color: '#0f172a',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  googleBtnSub: {
-    color: '#475569',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  googleChevron: {
-    color: '#64748b',
-    fontSize: 22,
-    fontWeight: '700',
-  },
-  appleBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#000000',
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
-    gap: 12,
-  },
-  providerIconCircleApple: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  appleIconText: {
-    fontSize: 20,
-    color: '#ffffff',
-  },
-  appleBtnTitle: {
-    color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  appleBtnSub: {
-    color: '#94a3b8',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  appleChevron: {
-    color: '#94a3b8',
-    fontSize: 22,
-    fontWeight: '700',
-  },
-  emailBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: '#1E293B',
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(249, 115, 22, 0.4)',
-    gap: 12,
-  },
-  providerIconCircleEmail: {
-    width: 38,
-    height: 38,
-    borderRadius: 12,
-    backgroundColor: 'rgba(249, 115, 22, 0.16)',
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  emailIconText: {
-    fontSize: 18,
-  },
-  emailBtnTitle: {
-    color: '#f8fafc',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  emailBtnSub: {
-    color: '#94a3b8',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  emailChevron: {
-    color: '#94a3b8',
-    fontSize: 22,
-    fontWeight: '700',
-  },
-  dividerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginVertical: 4,
-    gap: 10,
-  },
-  dividerLine: {
-    flex: 1,
-    height: 1,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  dividerText: {
-    color: '#64748b',
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  guestBtn: {
-    backgroundColor: 'rgba(255,255,255,0.04)',
-    borderRadius: 16,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    alignItems: 'center',
-  },
-  guestBtnTitle: {
-    color: '#e2e8f0',
-    fontSize: 14,
-    fontWeight: '800',
-    marginBottom: 4,
-  },
-  guestBtnSub: {
-    color: '#94a3b8',
-    fontSize: 11.5,
-    lineHeight: 16,
-    textAlign: 'center',
-  },
-  formCard: {
-    backgroundColor: '#131B2E',
-    borderRadius: 22,
-    padding: 18,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-  },
-  formHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 12,
-    marginBottom: 14,
-  },
-  formTitle: {
-    color: '#f8fafc',
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  formSubtitle: {
-    color: '#94a3b8',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  syncExplainBox: {
-    backgroundColor: 'rgba(34, 197, 94, 0.1)',
-    borderWidth: 1,
-    borderColor: 'rgba(34, 197, 94, 0.3)',
-    borderRadius: 14,
-    padding: 12,
-    marginBottom: 16,
-  },
-  syncExplainText: {
-    color: '#bbf7d0',
-    fontSize: 12.5,
-    lineHeight: 18,
-  },
-  emailTabSwitch: {
-    flexDirection: 'row',
-    backgroundColor: '#0B0F19',
-    borderRadius: 12,
-    padding: 4,
-    marginBottom: 16,
-  },
-  emailTabBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 9,
-    alignItems: 'center',
-  },
-  emailTabBtnActive: {
-    backgroundColor: '#f97316',
-  },
-  emailTabBtnText: {
-    color: '#94a3b8',
-    fontSize: 14,
-    fontWeight: '700',
-  },
-  emailTabBtnTextActive: {
-    color: '#ffffff',
-  },
-  nameRow: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  inputLabel: {
-    color: '#cbd5e1',
-    fontSize: 13,
-    fontWeight: '700',
-    marginBottom: 6,
-    marginTop: 10,
-  },
-  textInput: {
-    backgroundColor: '#0B0F19',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.15)',
-    borderRadius: 12,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    color: '#f8fafc',
-    fontSize: 14,
-  },
-  submitPrimaryBtn: {
-    backgroundColor: '#f97316',
-    borderRadius: 14,
-    paddingVertical: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginTop: 20,
-  },
-  submitPrimaryBtnText: {
-    color: '#ffffff',
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  forgotPassBtn: {
-    alignItems: 'center',
-    marginTop: 14,
-    paddingVertical: 6,
-  },
-  forgotPassText: {
-    color: '#93c5fd',
-    fontSize: 13,
-    fontWeight: '600',
-  },
+  flex: { flex: 1 },
+  safeArea: { flex: 1, backgroundColor: '#05070B' },
+  scrollContent: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 10, paddingBottom: 28 },
+  content: { width: '100%', maxWidth: 440, alignSelf: 'center' },
+  nav: { height: 52, justifyContent: 'center' },
+  back: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: '#101A2A' },
+  title: { color: '#F1F2F6', fontSize: 25, lineHeight: 32, fontWeight: '700', marginTop: 20, marginBottom: 28 },
+  nameRow: { flexDirection: 'row', gap: 12 },
+  field: { minHeight: 64, backgroundColor: '#0C1424', borderWidth: 1, borderColor: '#253753', borderRadius: 12, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 8, marginBottom: 16 },
+  fieldFocused: { borderColor: '#5478AF', backgroundColor: '#101D33' },
+  label: { color: '#B3B8C5', fontSize: 10, lineHeight: 15, letterSpacing: 0.6 },
+  input: { minWidth: 0, color: '#F0F1F6', fontSize: 16, lineHeight: 23, padding: 0, paddingTop: 5, paddingBottom: 1, borderWidth: 0, backgroundColor: 'transparent', ...Platform.select({ web: { outlineStyle: 'solid' as const, outlineWidth: 0, outlineColor: 'transparent' } }) },
+  passwordRow: { flexDirection: 'row', alignItems: 'center' },
+  eye: { minWidth: 36, minHeight: 32, justifyContent: 'center', alignItems: 'flex-end' },
+  forgot: { alignItems: 'center', paddingVertical: 7, marginTop: -2, marginBottom: 14, minHeight: 36, justifyContent: 'center' },
+  forgotText: { color: '#E0E2EA', fontSize: 14, lineHeight: 20 },
+  submit: { minHeight: 50, borderRadius: 13, alignItems: 'center', justifyContent: 'center', backgroundColor: '#173B72', marginTop: 2 },
+  submitDisabled: { backgroundColor: '#10213B' },
+  submitText: { fontSize: 16, fontWeight: '700', color: '#FFFFFF' },
+  submitTextDisabled: { color: '#7890B3' },
+  divider: { color: '#CFD2DC', textAlign: 'center', fontSize: 11, letterSpacing: 0.4, marginVertical: 26 },
+  providers: { gap: 16 },
+  provider: { minHeight: 50, borderWidth: 1, borderColor: '#243B5D', borderRadius: 10, backgroundColor: '#0C172A', flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 10, paddingHorizontal: 12, paddingVertical: 12 },
+  providerText: { fontSize: 14, color: '#EEF0F6', fontWeight: '600' },
+  accountRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', marginTop: 26, columnGap: 6 },
+  secondaryText: { color: '#AEB4C4', fontSize: 12, lineHeight: 18, textAlign: 'center' },
+  textLink: { minHeight: 36, justifyContent: 'center' },
+  linkText: { color: '#86ABDF', fontWeight: '600', fontSize: 12 },
+  guest: { alignSelf: 'center', paddingHorizontal: 12, paddingVertical: 10, marginTop: 2 },
+  error: { padding: 12, backgroundColor: '#39242D', borderRadius: 10, marginBottom: 16 },
+  errorText: { color: '#FFB4C4', fontSize: 13, lineHeight: 19 },
+  info: { padding: 12, backgroundColor: '#0E2039', borderRadius: 10, marginBottom: 16 },
+  infoText: { color: '#C0D2FF', fontSize: 13, lineHeight: 19 },
 });

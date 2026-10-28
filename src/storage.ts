@@ -6,6 +6,11 @@ import {
   HabitGoal,
   STORAGE_KEY,
   TABS,
+  getTabs,
+  getStateTabs,
+  normalizeDeletedTabs,
+  normalizeTabEdits,
+  normalizeCustomTabs,
   TabId,
 } from './constants';
 import { uid } from './utils';
@@ -51,6 +56,7 @@ export function seedState(): AppDataState {
     v: 1,
     section: 'rutin',
     tab: TABS[0].id,
+    customTabs: [],
     habits,
     marks: {},
     progress: {},
@@ -65,6 +71,10 @@ export async function loadAppState(): Promise<AppDataState> {
     if (raw) {
       const parsed = JSON.parse(raw) as AppDataState;
       if (parsed && Array.isArray(parsed.habits) && parsed.marks) {
+        parsed.customTabs = normalizeCustomTabs(parsed.customTabs);
+        parsed.deletedTabs = normalizeDeletedTabs(parsed.deletedTabs);
+        parsed.tabEdits = normalizeTabEdits(parsed.tabEdits);
+        parsed.tabOrder = getStateTabs(parsed).map((tab) => tab.id);
         if (!parsed.progress || typeof parsed.progress !== 'object') {
           parsed.progress = {};
         }
@@ -81,6 +91,7 @@ export async function loadAppState(): Promise<AppDataState> {
           TabId,
           [string, string][],
         ][]) {
+          if (parsed.deletedTabs.includes(tab as any)) continue;
           if (!parsed.habits.some((h) => h.tab === tab)) {
             for (const [name, detail] of items) {
               const goal = inferDefaultGoal(name);
@@ -100,8 +111,8 @@ export async function loadAppState(): Promise<AppDataState> {
             if (inferred) h.goal = inferred;
           }
         }
-        if (!TABS.some((t) => t.id === parsed.tab)) {
-          parsed.tab = TABS[0].id;
+        if (!getStateTabs(parsed).some((t) => t.id === parsed.tab)) {
+          parsed.tab = getStateTabs(parsed)[0].id;
         }
         return parsed;
       }

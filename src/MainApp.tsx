@@ -1,10 +1,9 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { InstantButton as TouchableOpacity } from './InstantButton';
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  Animated,
   AppState,
-  Easing,
   KeyboardAvoidingView,
   LogBox,
   Modal,
@@ -14,14 +13,12 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  TouchableOpacity,
   useWindowDimensions,
   View,
 } from 'react-native';
 import {
   SafeAreaProvider,
   SafeAreaView,
-  useSafeAreaInsets,
 } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
@@ -34,9 +31,20 @@ import {
   AppDataState,
   AuthUser,
   CloudSyncStatus,
+  CustomTab,
+  deleteTab,
+  editTab,
+  getStateTabs,
+  normalizeDeletedTabs,
+  normalizeTabEdits,
+  reorderTabs,
+  getTabs,
+  normalizeCustomTabs,
+  preserveLocalTabs,
   GoalType,
   Habit,
   HabitGoal,
+  HABIT_EMOJIS,
   MainSection,
   MARKS,
   MARK_COLORS,
@@ -44,6 +52,7 @@ import {
   Subtask,
   TABS,
   TabConfig,
+  TabTheme,
   TabId,
   TaskItem,
   TASKS_THEME,
@@ -61,16 +70,23 @@ import {
   TR_WEEKDAYS,
   TR_WEEKDAYS_SHORT,
   uid,
+  visibleDayRange,
 } from './utils';
 import { loadAppState, saveAppState, seedState } from './storage';
 import AuthScreen from './AuthScreen';
+import CategoryEditor from './CategoryEditor';
+import CategoryActions from './CategoryActions';
+import { SheetBackdrop, SheetHost } from './SheetBackdrop';
+import { useStableCallback } from './useStableCallback';
+import { useHabitTimers } from './useHabitTimers';
+import { activateLocalAccount, prepareLocalAccount } from './localAccounts';
+import { CardSheen, CategoryIcon, AccentSheen, HabitEmblem, habitEmoji, NeonBackdrop, PlusIcon } from './NeonDesign';
 import {
   ActivityHeatmap,
   animateLayout,
   AnimatedCheckCircle,
   AnimatedNumber,
   AnimatedProgressBar,
-  CategoryAtmosphere,
   ChainLink,
   ConfettiBurst,
   FadeSlideIn,
@@ -84,8 +100,8 @@ import {
   PressableScale,
   ProgressRing,
   SheetPressable,
-  SoftGradientOverlay,
   SpringDragList,
+  SpringDragItemControls,
   StreakIcon,
   SwipeableTaskRow,
   TaskRowMotion,
@@ -97,15 +113,8 @@ import {
   fetchStateFromCloud,
   hasPendingCloudSync,
   loadAuthSession,
-  loadFirebaseConfig,
-  saveFirebaseConfig,
   syncStateToCloud,
 } from './cloudSync';
-import {
-  DEFAULT_FIREBASE_CONFIG,
-  FirebaseConfigOptions,
-  isFirebaseConfigured,
-} from './firebaseConfig';
 
 const TIMER_PRESETS: { label: string; h: number; m: number }[] = [
   { label: '1 dk', h: 0, m: 1 },
@@ -126,6 +135,7 @@ const HOURS_LIST = Array.from({ length: 24 }, (_, i) => i);
 const MINUTES_LIST = Array.from({ length: 60 }, (_, i) => i);
 
 const TASK_NOTIFICATION_CHANNEL_ID = 'gorev-hatirlatici';
+const TASK_COMPLETE_COLOR = '#686868';
 
 if (Platform.OS !== 'web') {
   try {
@@ -385,15 +395,19 @@ interface MenuTarget {
 }
 
 interface HabitWeekScrollProps {
+  dayCount: number;
+  cellSize: number;
   initialScrollX: number;
   rowViewportWidth: number;
   cellStep: number;
   scrollKey: string;
   onTouchChange?: (touching: boolean) => void;
-  children: React.ReactNode;
+  children: (first: number, last: number) => React.ReactNode;
 }
 
 function HabitWeekScroll({
+  dayCount,
+  cellSize,
   initialScrollX,
   rowViewportWidth,
   cellStep,
@@ -402,12 +416,12 @@ function HabitWeekScroll({
   children,
 }: HabitWeekScrollProps) {
   const scrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
+  const [offset, setOffset] = useState(initialScrollX);
+  const [first, last] = visibleDayRange(dayCount, offset, cellStep, rowViewportWidth);
 
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      scrollRef.current?.scrollTo({ x: initialScrollX, y: 0, animated: false });
-    }, 0);
-    return () => clearTimeout(timer);
+  useLayoutEffect(() => {
+    setOffset(initialScrollX);
+    scrollRef.current?.scrollTo({ x: initialScrollX, y: 0, animated: false });
   }, [initialScrollX, scrollKey]);
 
   return (
@@ -419,6 +433,11 @@ function HabitWeekScroll({
       decelerationRate="fast"
       snapToInterval={cellStep}
       snapToAlignment="start"
+      onScroll={(event) => {
+        const next = event.nativeEvent.contentOffset.x;
+        setOffset((previous) => Math.floor(previous / cellStep) === Math.floor(next / cellStep) ? previous : next);
+      }}
+      scrollEventThrottle={16}
       contentOffset={{ x: initialScrollX, y: 0 }}
       onTouchStart={() => onTouchChange?.(true)}
       onTouchEnd={() => onTouchChange?.(false)}
@@ -439,10 +458,10 @@ function HabitWeekScroll({
       ]}
       contentContainerStyle={[
         styles.chainRow,
-        { paddingHorizontal: 10, paddingVertical: 12 },
+        { width: dayCount * cellStep - (cellStep - cellSize) + 20, height: cellSize + 24 },
       ]}
     >
-      {children}
+      {children(first, last)}
     </ScrollView>
   );
 }
@@ -589,13 +608,14 @@ function TimeWheelColumn({
 export default function MainApp() {
   return (
     <SafeAreaProvider>
+      <SheetHost>
       <GunlukPlanScreen />
+      </SheetHost>
     </SafeAreaProvider>
   );
 }
 
 function GunlukPlanScreen() {
-  const insets = useSafeAreaInsets();
   const { width: windowWidth } = useWindowDimensions();
   const [state, setState] = useState<AppDataState>(() => seedState());
   const [loaded, setLoaded] = useState(false);
@@ -618,6 +638,11 @@ function GunlukPlanScreen() {
 
   const [reorderMode, setReorderMode] = useState(false);
   const [monthlyViewMode, setMonthlyViewMode] = useState(false);
+  const [categoryEditorOpen, setCategoryEditorOpen] = useState(false);
+  const [categoryMenuId, setCategoryMenuId] = useState<TabId | null>(null);
+  const [categoryEditId, setCategoryEditId] = useState<TabId | null>(null);
+  const [categoryDragging, setCategoryDragging] = useState(false);
+  const categoryScrollRef = useRef<React.ComponentRef<typeof ScrollView>>(null);
   const [menuTarget, setMenuTarget] = useState<MenuTarget | null>(null);
 
   // Ekle / Düzenle Modal Durumu (Container'a basılı tutunca açılır)
@@ -625,6 +650,8 @@ function GunlukPlanScreen() {
   const [editingHabit, setEditingHabit] = useState<Habit | null>(null);
   const [habitName, setHabitName] = useState('');
   const [habitDetail, setHabitDetail] = useState('');
+  const [habitEmojiChoice, setHabitEmojiChoice] = useState('');
+  const [emojiPickerOpen, setEmojiPickerOpen] = useState(false);
   const [goalType, setGoalType] = useState<GoalType>('none');
   const [timerHour, setTimerHour] = useState('0');
   const [timerMin, setTimerMin] = useState('2');
@@ -636,8 +663,6 @@ function GunlukPlanScreen() {
 
   // Sayaç / Miktar / Tekrar Arayüzü Durumu (Container'a dokununca açılır)
   const [actionHabitId, setActionHabitId] = useState<string | null>(null);
-  const [timerRunning, setTimerRunning] = useState(false);
-  const [timerRemaining, setTimerRemaining] = useState(0);
   const [timerFinishKey, setTimerFinishKey] = useState(0);
   const [customAmountStr, setCustomAmountStr] = useState('');
 
@@ -649,16 +674,12 @@ function GunlukPlanScreen() {
 
   // Kimlik Doğrulama (Giriş / Kayıt) & Bulut Yedekleme Durumu
   const [authUser, setAuthUser] = useState<AuthUser | null>(null);
+  const [cloudReady, setCloudReady] = useState(false);
   const [onboardingDone, setOnboardingDone] = useState(false);
   const [authScreenVisible, setAuthScreenVisible] = useState(false);
   const [cloudSyncStatus, setCloudSyncStatus] =
     useState<CloudSyncStatus>('idle');
   const [cloudNoticeMsg, setCloudNoticeMsg] = useState('');
-  const [firebaseSettingsOpen, setFirebaseSettingsOpen] = useState(false);
-  const [fbConfig, setFbConfig] = useState<FirebaseConfigOptions>(
-    DEFAULT_FIREBASE_CONFIG
-  );
-  const [fbConfigSavedBanner, setFbConfigSavedBanner] = useState(false);
 
   // Görevler (Google Görevler benzeri) Durumu
   const [taskFilter, setTaskFilter] = useState<'all' | 'starred'>('all');
@@ -681,8 +702,6 @@ function GunlukPlanScreen() {
   const [taskSubtasks, setTaskSubtasks] = useState<Subtask[]>([]);
   const [newTaskSubtaskTitle, setNewTaskSubtaskTitle] = useState('');
   const [confirmTaskDelete, setConfirmTaskDelete] = useState(false);
-  // Tamamlanma animasyonu oynarken (liste kaymadan önce) dairesi dolu görünen görevler
-  const [completingTaskIds, setCompletingTaskIds] = useState<string[]>([]);
   // Sekmedeki tüm maddeler bugün tamamlanınca tetiklenen kutlama (konfeti) sayacı
   const [celebrateKey, setCelebrateKey] = useState(0);
   const prevDoneRef = useRef<{ tab: TabId; done: number } | null>(null);
@@ -719,26 +738,28 @@ function GunlukPlanScreen() {
   };
 
   // Hero emoji animasyonu
-  const heroAnim = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
     let mounted = true;
     Promise.all([
       loadAppState(),
       loadAuthSession(),
-      loadFirebaseConfig(),
-      hasPendingCloudSync(),
-    ]).then(async ([initial, session, loadedFbConfig, pendingSync]) => {
+    ]).then(async ([loadedState, session]) => {
       if (!mounted) return;
+      const pendingSync = session.user ? await hasPendingCloudSync(session.user) : false;
+      const initial = session.user && session.user.provider !== 'guest'
+        ? await prepareLocalAccount(session.user.uid, loadedState, seedState()) : loadedState;
+      stateRef.current = initial;
       setState(initial);
       setProfileFirstName(initial.profile?.firstName || '');
       setProfileLastName(initial.profile?.lastName || '');
-      setFbConfig(loadedFbConfig);
       setAuthUser(session.user);
       setOnboardingDone(session.hasCompletedOnboarding);
       setLoaded(true);
 
       if (session.user && session.user.provider !== 'guest') {
+        await activateLocalAccount(session.user.uid, initial);
+        try {
         if (pendingSync) {
           setCloudSyncStatus('syncing');
           const res = await syncStateToCloud(session.user, initial);
@@ -753,12 +774,18 @@ function GunlukPlanScreen() {
             (cloudState.updatedAt || 0) > (initial.updatedAt || 0)
           ) {
             skipNextAutoCloudSyncRef.current = true;
-            setState(cloudState);
+            const restoredLocal = preserveLocalTabs(cloudState, stateRef.current);
+            setState(restoredLocal);
             setProfileFirstName(cloudState.profile?.firstName || '');
             setProfileLastName(cloudState.profile?.lastName || '');
-            await saveAppState(cloudState);
+            await saveAppState(restoredLocal);
           }
-          setCloudSyncStatus('synced');
+          setCloudSyncStatus(cloudState ? 'synced' : 'idle');
+        }
+        setCloudReady(true);
+        } catch (error) {
+          setCloudSyncStatus('error');
+          setCloudNoticeMsg(error instanceof Error ? error.message : 'Bulut bağlantısı kurulamadı.');
         }
       }
     });
@@ -770,7 +797,7 @@ function GunlukPlanScreen() {
   // Kullanıcı veri değiştirdiğinde önce yerel AsyncStorage'a kaydedilir,
   // ardından Google/Apple/E-posta ile giriş yapılmışsa arka planda otomatik buluta yedeklenir.
   useEffect(() => {
-    if (!loaded || !authUser || authUser.provider === 'guest') return;
+    if (!loaded || !cloudReady || !authUser || authUser.provider === 'guest') return;
     if (skipNextAutoCloudSyncRef.current) {
       skipNextAutoCloudSyncRef.current = false;
       return;
@@ -784,17 +811,18 @@ function GunlukPlanScreen() {
         setCloudSyncStatus('offline-pending');
       } else {
         setCloudSyncStatus('error');
+        if (res.error) setCloudNoticeMsg(res.error);
       }
     }, 900);
     return () => clearTimeout(timer);
-  }, [loaded, authUser, state.updatedAt]);
+  }, [loaded, cloudReady, authUser, state.updatedAt]);
 
   // Çevrimdışı iken yapılan değişiklikleri internet geldiğinde otomatik buluta gönder
   useEffect(() => {
-    if (!loaded || !authUser || authUser.provider === 'guest') return;
+    if (!loaded || !cloudReady || !authUser || authUser.provider === 'guest') return;
 
     const flushPendingIfOnline = async () => {
-      const pending = await hasPendingCloudSync();
+      const pending = await hasPendingCloudSync(authUser);
       if (!pending && cloudSyncStatus !== 'offline-pending') return;
       setCloudSyncStatus('syncing');
       const res = await syncStateToCloud(authUser, stateRef.current);
@@ -812,7 +840,7 @@ function GunlukPlanScreen() {
 
     const interval = setInterval(flushPendingIfOnline, 20000);
     return () => clearInterval(interval);
-  }, [loaded, authUser, cloudSyncStatus]);
+  }, [loaded, cloudReady, authUser, cloudSyncStatus]);
 
   // Görev bildirimlerini zamanla (iOS / Android yerel bildirimler)
   useEffect(() => {
@@ -875,8 +903,8 @@ function GunlukPlanScreen() {
             d: now.getDate(),
           };
         });
-        if (authUser && authUser.provider !== 'guest') {
-          hasPendingCloudSync().then(async (pending) => {
+        if (cloudReady && authUser && authUser.provider !== 'guest') {
+          hasPendingCloudSync(authUser).then(async (pending) => {
             if (pending) {
               setCloudSyncStatus('syncing');
               const res = await syncStateToCloud(authUser, stateRef.current);
@@ -887,44 +915,27 @@ function GunlukPlanScreen() {
       }
     });
     return () => sub.remove();
-  }, [authUser]);
+  }, [authUser, cloudReady]);
 
-  // Hero emoji sürekli animasyonu
+  const tabs = useMemo(() => getStateTabs(state), [state.customTabs, state.tabOrder, state.deletedTabs, state.tabEdits]);
+  const categoryTabWidth = Math.max(68, Math.min(180, (Math.min(windowWidth, 760) - 54) / 4));
+  const categoryScrollX = Math.max(0, (tabs.findIndex((tab) => tab.id === state.tab) + 0.5) * (categoryTabWidth + 4) - Math.min(windowWidth - 32, 728) / 2);
   useEffect(() => {
-    heroAnim.setValue(0);
-    const loop = Animated.loop(
-      Animated.sequence([
-        Animated.timing(heroAnim, {
-          toValue: 1,
-          duration: 1600,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-        Animated.timing(heroAnim, {
-          toValue: 0,
-          duration: 1600,
-          easing: Easing.inOut(Easing.sin),
-          useNativeDriver: true,
-        }),
-      ])
-    );
-    loop.start();
-    return () => loop.stop();
-  }, [state.tab, heroAnim]);
-
+    categoryScrollRef.current?.scrollTo({ x: categoryScrollX, animated: false });
+  }, [categoryScrollX, loaded, state.section, profileOpen]);
   const activeTab: TabConfig = useMemo(
-    () => TABS.find((t) => t.id === state.tab) || TABS[0],
-    [state.tab]
+    () => tabs.find((t) => t.id === state.tab) || tabs[0],
+    [state.tab, tabs]
   );
   const isTasksMode = state.section === 'gorevler' && !profileOpen;
   const theme = isTasksMode ? TASKS_THEME : activeTab.theme;
 
-  const updateAndSave = (updater: (prev: AppDataState) => AppDataState) => {
+  const updateAndSave = (updater: (prev: AppDataState) => AppDataState, sync = true) => {
     setState((prev) => {
       const updated = updater(prev);
       const next: AppDataState = {
         ...updated,
-        updatedAt: Date.now(),
+        updatedAt: sync ? Date.now() : prev.updatedAt,
       };
       scheduleSaveAppState(next);
       return next;
@@ -935,6 +946,7 @@ function GunlukPlanScreen() {
   // Yeni bir cihazda Google/Apple/E-posta ile giriş yapıldığında buluttaki yedeği indirir,
   // eğer bulutta henüz yedek yoksa mevcut yerel verileri buluta yedekler.
   const handleUserAuthenticated = async (user: AuthUser) => {
+    setCloudReady(false);
     setAuthUser(user);
     setOnboardingDone(true);
     setAuthScreenVisible(false);
@@ -946,12 +958,24 @@ function GunlukPlanScreen() {
     }
 
     setCloudSyncStatus('syncing');
-    const cloudBackup = await fetchStateFromCloud(user);
+    const localState = await prepareLocalAccount(user.uid, stateRef.current, seedState());
+    // Show only the current account's local data even if cloud setup is incomplete.
+    stateRef.current = localState;
+    setState(localState);
+    await saveAppState(localState);
+    await activateLocalAccount(user.uid, localState);
+    let cloudBackup: AppDataState | null;
+    try { cloudBackup = await fetchStateFromCloud(user); }
+    catch (error) {
+      setCloudSyncStatus('error');
+      setCloudNoticeMsg(error instanceof Error ? error.message : 'Bulut bağlantısı kurulamadı.');
+      return;
+    }
 
     if (cloudBackup) {
       skipNextAutoCloudSyncRef.current = true;
       const syncedNow = formatNowTimestamp();
-      const restoredState: AppDataState = {
+      const restoredState: AppDataState = preserveLocalTabs({
         ...cloudBackup,
         profile: {
           firstName:
@@ -970,11 +994,12 @@ function GunlukPlanScreen() {
           lastCloudSyncAt: syncedNow,
           lastRestoreAt: syncedNow,
         },
-      };
+      }, localState);
       setState(restoredState);
       setProfileFirstName(restoredState.profile?.firstName || '');
       setProfileLastName(restoredState.profile?.lastName || '');
       await saveAppState(restoredState);
+      await activateLocalAccount(user.uid, restoredState);
       setCloudSyncStatus('synced');
       setCloudNoticeMsg(
         `✓ ${
@@ -983,16 +1008,16 @@ function GunlukPlanScreen() {
       );
     } else {
       const syncedNow = formatNowTimestamp();
-      const first = state.profile?.firstName || user.firstName || '';
-      const last = state.profile?.lastName || user.lastName || '';
+      const first = localState.profile?.firstName || user.firstName || '';
+      const last = localState.profile?.lastName || user.lastName || '';
       setProfileFirstName(first);
       setProfileLastName(last);
 
       const nextState: AppDataState = {
-        ...state,
+        ...localState,
         updatedAt: Date.now(),
         profile: {
-          ...(state.profile || { firstName: '', lastName: '' }),
+          ...(localState.profile || { firstName: '', lastName: '' }),
           firstName: first,
           lastName: last,
           email: user.email,
@@ -1003,16 +1028,18 @@ function GunlukPlanScreen() {
       skipNextAutoCloudSyncRef.current = true;
       setState(nextState);
       await saveAppState(nextState);
+      await activateLocalAccount(user.uid, nextState);
       const res = await syncStateToCloud(user, nextState);
-      setCloudSyncStatus(res.ok ? 'synced' : 'offline-pending');
+      setCloudSyncStatus(res.ok ? 'synced' : res.offline ? 'offline-pending' : 'error');
       setCloudNoticeMsg(
         res.ok
           ? `✓ Mevcut tüm verileriniz ${
               user.email || 'hesabınıza'
             } başarıyla yedeklendi.`
-          : '⚡ Verileriniz cihazınıza kaydedildi, internet bağlantısı kurulduğunda buluta yedeklenecek.'
+          : res.error || 'Veriler cihazda saklanıyor; bulut bağlantısı bekleniyor.'
       );
     }
+    setCloudReady(true);
   };
 
   const handleManualCloudBackup = async () => {
@@ -1020,6 +1047,7 @@ function GunlukPlanScreen() {
       setAuthScreenVisible(true);
       return;
     }
+    if (!cloudReady) { await handleUserAuthenticated(authUser); return; }
     Haptics.selectionAsync().catch(() => {});
     setCloudSyncStatus('syncing');
     setCloudNoticeMsg('');
@@ -1044,9 +1072,9 @@ function GunlukPlanScreen() {
       setCloudSyncStatus('synced');
       setCloudNoticeMsg('✓ Tüm verileriniz bulut hesabınıza başarıyla yedeklendi.');
     } else {
-      setCloudSyncStatus('offline-pending');
+      setCloudSyncStatus(res.offline ? 'offline-pending' : 'error');
       setCloudNoticeMsg(
-        '⚡ İnternet bağlantısı yok. Verileriniz telefonda güvende; bağlantı sağlandığında otomatik yedeklenecek.'
+        res.error || 'Veriler cihazda saklanıyor; bulut bağlantısı bekleniyor.'
       );
     }
   };
@@ -1056,11 +1084,17 @@ function GunlukPlanScreen() {
     Haptics.selectionAsync().catch(() => {});
     setCloudSyncStatus('syncing');
     setCloudNoticeMsg('');
-    const cloudBackup = await fetchStateFromCloud(authUser);
+    let cloudBackup: AppDataState | null;
+    try { cloudBackup = await fetchStateFromCloud(authUser); }
+    catch (error) {
+      setCloudSyncStatus('error');
+      setCloudNoticeMsg(error instanceof Error ? error.message : 'Bulut yedeği yüklenemedi.');
+      return;
+    }
     if (cloudBackup) {
       skipNextAutoCloudSyncRef.current = true;
       const syncedNow = formatNowTimestamp();
-      const restored: AppDataState = {
+      const restored: AppDataState = preserveLocalTabs({
         ...cloudBackup,
         profile: {
           firstName: cloudBackup.profile?.firstName || authUser.firstName || '',
@@ -1071,7 +1105,7 @@ function GunlukPlanScreen() {
           lastCloudSyncAt: syncedNow,
           lastRestoreAt: syncedNow,
         },
-      };
+      }, stateRef.current);
       setState(restored);
       setProfileFirstName(restored.profile?.firstName || '');
       setProfileLastName(restored.profile?.lastName || '');
@@ -1079,7 +1113,7 @@ function GunlukPlanScreen() {
       setCloudSyncStatus('synced');
       setCloudNoticeMsg('✓ Buluttaki en güncel yedek telefonunuza indirildi.');
     } else {
-      setCloudSyncStatus('synced');
+      setCloudSyncStatus('idle');
       setCloudNoticeMsg('ℹ️ Bu hesaba ait bulutta kayıtlı başka bir yedek bulunamadı.');
     }
   };
@@ -1088,21 +1122,10 @@ function GunlukPlanScreen() {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium).catch(() => {});
     await clearAuthSession();
     setAuthUser(null);
+    setCloudReady(false);
     setCloudSyncStatus('idle');
     setCloudNoticeMsg('');
     setAuthScreenVisible(true);
-  };
-
-  const handleSaveFirebaseSettings = async () => {
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(
-      () => {}
-    );
-    await saveFirebaseConfig(fbConfig);
-    setFbConfigSavedBanner(true);
-    setTimeout(() => setFbConfigSavedBanner(false), 3000);
-    if (authUser && authUser.provider !== 'guest') {
-      handleManualCloudBackup();
-    }
   };
 
   const getMark = (habitId: string, dateStr: string): MarkType | '' => {
@@ -1136,7 +1159,8 @@ function GunlukPlanScreen() {
   const setProgressAndAutoMark = (
     habit: Habit,
     dateStr: string,
-    newVal: number
+    newVal: number,
+    sync = true
   ) => {
     const clamped = Math.max(0, Math.round(newVal * 100) / 100);
     const target = habit.goal?.target || 0;
@@ -1181,7 +1205,7 @@ function GunlukPlanScreen() {
         }
       }
       return { ...prev, progress: nextProgress, marks: nextMarks };
-    });
+    }, sync);
   };
 
   const actionHabit = useMemo(
@@ -1189,51 +1213,24 @@ function GunlukPlanScreen() {
     [state.habits, actionHabitId]
   );
 
-  // Sayaç geri sayım döngüsü
-  useEffect(() => {
-    if (!timerRunning || !actionHabit || actionHabit.goal?.type !== 'timer') {
-      return;
-    }
-    const targetSec = actionHabit.goal.target || 0;
-    const interval = setInterval(() => {
-      setTimerRemaining((prev) => {
-        if (prev <= 1) {
-          setTimerRunning(false);
-          setTimerFinishKey((k) => k + 1);
-          Haptics.notificationAsync(
-            Haptics.NotificationFeedbackType.Success
-          ).catch(() => {});
-          setProgressAndAutoMark(actionHabit, today.key, targetSec);
-          return 0;
-        }
-        const nextRem = prev - 1;
-        const elapsed = Math.max(0, targetSec - nextRem);
-        setProgressAndAutoMark(actionHabit, today.key, elapsed);
-        return nextRem;
-      });
-    }, 1000);
-    return () => clearInterval(interval);
-  }, [timerRunning, actionHabit, today.key]);
+  const { timers, ready: timersReady } = useHabitTimers(loaded, state.habits, setProgressAndAutoMark);
+  const actionTimer = actionHabit ? timers.get(actionHabit.id) : undefined;
+  const timerRunning = actionTimer?.running ?? false;
+  const targetSeconds = actionHabit?.goal?.target || 0;
+  const savedSeconds = actionHabit ? getProgress(actionHabit.id, today.key) : 0;
+  const timerRemaining = actionTimer?.remaining ??
+    (savedSeconds > 0 && savedSeconds < targetSeconds ? targetSeconds - savedSeconds : targetSeconds);
 
   const handleCardPress = (habit: Habit) => {
     if (!habit.goal || habit.goal.type === 'none' || habit.goal.target <= 0) {
       return;
     }
     Haptics.selectionAsync().catch(() => {});
-    setTimerRunning(false);
     setCustomAmountStr('');
-    if (habit.goal.type === 'timer') {
-      const targetSec = habit.goal.target;
-      const doneSec = getProgress(habit.id, today.key);
-      const initialRem =
-        doneSec > 0 && doneSec < targetSec ? targetSec - doneSec : targetSec;
-      setTimerRemaining(initialRem);
-    }
     setActionHabitId(habit.id);
   };
 
   const closeActionModal = () => {
-    setTimerRunning(false);
     setActionHabitId(null);
   };
 
@@ -1396,6 +1393,8 @@ function GunlukPlanScreen() {
     setEditingHabit(habit);
     setHabitName(habit ? habit.name : '');
     setHabitDetail(habit ? habit.detail : '');
+    setHabitEmojiChoice(habit?.emoji || '');
+    setEmojiPickerOpen(false);
     const g = habit?.goal;
     if (g && g.type !== 'none' && g.target > 0) {
       setGoalType(g.type);
@@ -1424,6 +1423,56 @@ function GunlukPlanScreen() {
     setNewSubtaskTitle('');
     setConfirmDelete(false);
     setEditorOpen(true);
+  };
+
+  const handleCreateTab = (choices: Omit<CustomTab, 'id'>) => {
+    const created: CustomTab = { ...choices, id: `custom-${uid()}` };
+    setReorderMode(false);
+    updateAndSave((prev) => ({
+      ...prev,
+      customTabs: [...(prev.customTabs || []), created],
+      section: 'rutin',
+      tab: created.id,
+    }));
+    setCategoryEditorOpen(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  };
+
+  const openCategoryMenu = (id: TabId) => {
+    if (!tabs.some((tab) => tab.id === id)) return;
+    Haptics.selectionAsync().catch(() => {});
+    setCategoryMenuId(id);
+  };
+
+  const handleDeleteTab = (id: TabId) => {
+    updateAndSave((prev) => deleteTab(prev, id));
+    setCategoryMenuId(null);
+    setReorderMode(false);
+    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success).catch(() => {});
+  };
+
+  const handleEditCategory = (id: TabId) => {
+    setCategoryEditId(id);
+    setCategoryMenuId(null);
+    setCategoryEditorOpen(true);
+  };
+
+  const handleSaveCategory = (appearance: Omit<CustomTab, 'id'>) => {
+    if (!categoryEditId) { handleCreateTab(appearance); return; }
+    updateAndSave((prev) => editTab(prev, categoryEditId, appearance));
+    setCategoryEditorOpen(false);
+    setCategoryEditId(null);
+  };
+
+  const reorderCategories = (from: number, to: number) => {
+    updateAndSave((prev) => reorderTabs(prev, from, to));
+  };
+
+  const moveCategory = (id: TabId, direction: -1 | 1) => {
+    updateAndSave((prev) => {
+      const from = getStateTabs(prev).findIndex((tab) => tab.id === id);
+      return reorderTabs(prev, from, from + direction);
+    });
   };
 
   const syncSubtasksIfEditing = (nextList: Subtask[]) => {
@@ -1524,6 +1573,7 @@ function GunlukPlanScreen() {
                   ...h,
                   name: trimmedName,
                   detail: trimmedDetail,
+                  emoji: habitEmojiChoice || undefined,
                   goal: finalGoal,
                   subtasks: finalSubtasks,
                 }
@@ -1540,6 +1590,7 @@ function GunlukPlanScreen() {
             tab: prev.tab,
             name: trimmedName,
             detail: trimmedDetail,
+            emoji: habitEmojiChoice || undefined,
             goal: finalGoal,
             subtasks: finalSubtasks,
           },
@@ -1757,18 +1808,6 @@ function GunlukPlanScreen() {
           : t
       ),
     }));
-  };
-
-  // Aktif listedeki daireye dokununca: önce daire dolup ✓ belirir, ardından görev
-  // yumuşak bir kaymayla "Tamamlananlar" bölümüne taşınır (Google Görevler hissi).
-  const handleCompleteTaskAnimated = (taskId: string) => {
-    if (completingTaskIds.includes(taskId)) return;
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {});
-    setCompletingTaskIds((ids) => [...ids, taskId]);
-    setTimeout(() => {
-      handleToggleTaskDone(taskId);
-      setCompletingTaskIds((ids) => ids.filter((id) => id !== taskId));
-    }, 320);
   };
 
   const handleToggleTaskStar = (taskId: string) => {
@@ -1998,6 +2037,7 @@ function GunlukPlanScreen() {
             : state.profile?.lastName || '';
         setProfileFirstName(restoredFirstName);
         setProfileLastName(restoredLastName);
+        const restoredCustomTabs = normalizeCustomTabs(parsed.customTabs);
         updateAndSave((prev) => ({
           v: 1,
           section:
@@ -2014,9 +2054,13 @@ function GunlukPlanScreen() {
               ? parsed.progress
               : {},
           tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
-          tab: TABS.some((t) => t.id === parsed.tab)
+          customTabs: restoredCustomTabs,
+          tabOrder: getTabs(restoredCustomTabs, parsed.tabOrder, parsed.deletedTabs, parsed.tabEdits).map((tab) => tab.id),
+          deletedTabs: normalizeDeletedTabs(parsed.deletedTabs),
+          tabEdits: normalizeTabEdits(parsed.tabEdits),
+          tab: getTabs(restoredCustomTabs, parsed.tabOrder, parsed.deletedTabs, parsed.tabEdits).some((t) => t.id === parsed.tab)
             ? parsed.tab
-            : TABS[0].id,
+            : getTabs(restoredCustomTabs, parsed.tabOrder, parsed.deletedTabs, parsed.tabEdits)[0].id,
           profile: {
             firstName: restoredFirstName,
             lastName: restoredLastName,
@@ -2069,10 +2113,6 @@ function GunlukPlanScreen() {
     [tabHabits, state.marks, today.key]
   );
 
-  const pct = tabHabits.length
-    ? Math.round((doneToday / tabHabits.length) * 100)
-    : 0;
-
   // Aynı sekmede son madde de tamamlanınca (%100) kutlama: konfeti + hero zıplaması + titreşim
   useEffect(() => {
     const prev = prevDoneRef.current;
@@ -2101,87 +2141,20 @@ function GunlukPlanScreen() {
   const rightBorderW = theme.cardBorderWidth;
   const cardInnerWidth = Math.max(
     224,
-    windowWidth - 32 - 36 - leftBorderW - rightBorderW
+    Math.min(windowWidth, 760) - 32 - 28 - leftBorderW - rightBorderW
   );
   const cellGap = 8;
   const cellSize = Math.floor((cardInnerWidth - cellGap * 6) / 7);
   const rowViewportWidth = cellSize * 7 + cellGap * 6;
   const cellStep = cellSize + cellGap;
 
-  // Bugün hangi günse o günün haftası (Pazartesi..Pazar) başlangıçta görünsün
-  const dayOfWeekFromMon = (today.now.getDay() + 6) % 7; // Pazartesi=0 ... Pazar=6
-  const mondayOfTodayWeek = today.d - dayOfWeekFromMon;
+  // Son yedi gün başlangıçta görünsün; ayın kalanına yatay kaydırılır.
+  const weekStartDay = today.d - 6;
   const startDay = isCurrentMonth
-    ? Math.max(1, Math.min(mondayOfTodayWeek, dim - 6))
+    ? Math.max(1, Math.min(weekStartDay, dim - 6))
     : 1;
   const initialScrollX = (startDay - 1) * cellStep;
   const scrollKey = `${state.tab}-${viewMonth.y}-${viewMonth.m}-${today.key}`;
-
-  // Hero emoji dönüşümü
-  const emojiAnimatedStyle = useMemo(() => {
-    switch (theme.anim) {
-      case 'wobble':
-        return {
-          transform: [
-            {
-              rotate: heroAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: ['-6deg', '8deg'],
-              }),
-            },
-          ],
-        };
-      case 'pulse':
-        return {
-          transform: [
-            {
-              scale: heroAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [1, 1.14],
-              }),
-            },
-          ],
-        };
-      case 'floaty':
-        return {
-          transform: [
-            {
-              translateY: heroAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0, -5],
-              }),
-            },
-          ],
-        };
-      case 'flip':
-        return {
-          transform: [
-            {
-              scaleX: heroAnim.interpolate({
-                inputRange: [0, 0.5, 1],
-                outputRange: [1, 0.85, 1],
-              }),
-            },
-          ],
-        };
-      case 'glow':
-      default:
-        return {
-          opacity: heroAnim.interpolate({
-            inputRange: [0, 1],
-            outputRange: [0.88, 1],
-          }),
-          transform: [
-            {
-              scale: heroAnim.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0.97, 1.06],
-              }),
-            },
-          ],
-        };
-    }
-  }, [theme.anim, heroAnim]);
 
   const getCellRadiusStyle = (size: number) => {
     if (theme.cellArch) {
@@ -2199,6 +2172,7 @@ function GunlukPlanScreen() {
 
   // Profil: son 12 haftanın günlük tamamlanma ısı haritası
   const heatmapWeeks = useMemo(() => {
+    if (!profileOpen) return [];
     const total = state.habits.length;
     const end = new Date(today.y, today.m, today.d);
     const dayFromMonday = (end.getDay() + 6) % 7;
@@ -2223,7 +2197,7 @@ function GunlukPlanScreen() {
         };
       })
     );
-  }, [state.habits, state.marks, today.y, today.m, today.d, today.key]);
+  }, [profileOpen, state.habits, state.marks, today.y, today.m, today.d, today.key]);
 
   const heatmapPerfectDays = useMemo(
     () => heatmapWeeks.flat().filter((d) => !d.future && d.ratio >= 1).length,
@@ -2244,22 +2218,37 @@ function GunlukPlanScreen() {
     [state.habits, state.marks, today.key]
   );
   const totalMarkedDays = useMemo(
-    () =>
+    () => !profileOpen ? 0 :
       Object.values(state.marks).reduce(
         (acc, m) => acc + Object.keys(m || {}).length,
         0
       ),
-    [state.marks]
+    [profileOpen, state.marks]
   );
   const maxBestStreak = useMemo(
-    () =>
+    () => !profileOpen ? 0 :
       state.habits.reduce(
         (max, h) =>
           Math.max(max, calculateStreaks(state.marks[h.id], today.key).best),
         0
       ),
-    [state.habits, state.marks, today.key]
+    [profileOpen, state.habits, state.marks, today.key]
   );
+
+  const stableHandleCardPress = useStableCallback(handleCardPress);
+  const stableHandleCellPress = useStableCallback(handleCellPress);
+  const stableHandleCellLongPress = useStableCallback(handleCellLongPress);
+  const stableOpenEditor = useStableCallback(openEditor);
+  const stableMoveHabit = useStableCallback(moveHabit);
+  const stableSetListGestureActive = useStableCallback(setListGestureActive);
+  const habitCardActions = useMemo<HabitCardActions>(() => ({
+    handleCardPress: stableHandleCardPress,
+    handleCellPress: stableHandleCellPress,
+    handleCellLongPress: stableHandleCellLongPress,
+    openEditor: stableOpenEditor,
+    moveHabit: stableMoveHabit,
+    setListGestureActive: stableSetListGestureActive,
+  }), [stableHandleCardPress, stableHandleCellPress, stableHandleCellLongPress, stableOpenEditor, stableMoveHabit, stableSetListGestureActive]);
 
   if (!loaded) {
     return (
@@ -2319,19 +2308,14 @@ function GunlukPlanScreen() {
       <StatusBar style={theme.isDark ? 'light' : 'dark'} />
 
       {/* Kategoriye Göre Dinamik 3D Partikül Atmosferi (Yüksek Performanslı Native Driver) */}
-      <CategoryAtmosphere
-        category={isTasksMode ? 'gorevler' : state.tab}
-        isDark={theme.isDark}
-      />
+      <NeonBackdrop color={theme.accent} />
 
       {/* Üst Başlık (Buzlu Cam / Glassmorphism Segmented Bar & Minimal Kontroller) */}
       <View
         style={[
           styles.topbar,
           {
-            backgroundColor:
-              theme.surfaceGlass ||
-              withAlpha(theme.surface, theme.isDark ? 0.78 : 0.85),
+            backgroundColor: 'transparent',
             borderBottomColor: theme.isDark
               ? 'rgba(255,255,255,0.06)'
               : 'rgba(0,0,0,0.04)',
@@ -2345,7 +2329,9 @@ function GunlukPlanScreen() {
         ]}
       >
         <View style={styles.topbarLeft}>
-          {profileOpen ? (
+
+
+      {profileOpen ? (
             <TouchableOpacity
               onPress={() => {
                 Haptics.selectionAsync().catch(() => {});
@@ -2390,8 +2376,9 @@ function GunlukPlanScreen() {
                   activeSection === 'rutin' && [
                     styles.topModeTabBtnActive,
                     {
-                      backgroundColor: theme.surface,
-                      shadowColor: theme.isDark ? '#000' : theme.accent,
+                      backgroundColor: withAlpha(theme.accent, 0.22),
+                      borderColor: theme.accent,
+                      shadowColor: theme.accent,
                     },
                   ],
                 ]}
@@ -2417,8 +2404,9 @@ function GunlukPlanScreen() {
                   activeSection === 'gorevler' && [
                     styles.topModeTabBtnActive,
                     {
-                      backgroundColor: theme.surface,
-                      shadowColor: '#000',
+                      backgroundColor: withAlpha(theme.accent, 0.22),
+                      borderColor: theme.accent,
+                      shadowColor: theme.accent,
                     },
                   ],
                 ]}
@@ -2480,11 +2468,8 @@ function GunlukPlanScreen() {
                   : theme.isDark
                   ? 'rgba(255,255,255,0.08)'
                   : 'rgba(255,255,255,0.9)',
-                borderColor: profileOpen
-                  ? theme.accent
-                  : theme.isDark
-                  ? 'rgba(255,255,255,0.14)'
-                  : 'rgba(0,0,0,0.08)',
+                borderColor: theme.accent,
+                shadowColor: theme.accent,
               },
             ]}
           >
@@ -2509,6 +2494,166 @@ function GunlukPlanScreen() {
           </TouchableOpacity>
         </View>
       </View>
+
+          {!profileOpen && activeSection === 'rutin' && (<>
+      {/* Üst kategori seçici */}
+      <View
+        style={[
+          styles.categoryBar,
+          {
+            width: Math.min(windowWidth - 32, 728),
+            borderColor: withAlpha(theme.accent, 0.4),
+            backgroundColor:
+              theme.surfaceGlass ||
+              withAlpha(theme.surface, theme.isDark ? 0.82 : 0.86),
+            borderTopColor: theme.isDark
+              ? 'rgba(255,255,255,0.08)'
+              : 'rgba(0,0,0,0.06)',
+            paddingBottom: 4,
+          },
+          Platform.OS === 'web'
+            ? ({
+                backdropFilter: 'blur(22px)',
+                WebkitBackdropFilter: 'blur(22px)',
+              } as any)
+            : null,
+        ]}
+      >
+        <ScrollView
+          ref={categoryScrollRef}
+          horizontal
+          scrollEnabled={!categoryDragging}
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.tabsScroll}
+          onContentSizeChange={() => {
+            categoryScrollRef.current?.scrollTo({ x: categoryScrollX, animated: false });
+          }}
+        >
+          <SpringDragList
+            items={tabs}
+            keyExtractor={(tab) => tab.id}
+            axis="horizontal"
+            holdDelay={450}
+            gap={4}
+            accentColor={theme.accent}
+            borderRadius={theme.radius}
+            onReorder={reorderCategories}
+            onDragActiveChange={setCategoryDragging}
+            onLongPressNoDrag={(tab) => openCategoryMenu(tab.id)}
+            onStartHaptic={() => { Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light).catch(() => {}); }}
+            onStepHaptic={() => { Haptics.selectionAsync().catch(() => {}); }}
+            renderItem={(t, _index, dragControls) => {
+            const hs = state.habits.filter((h) => h.tab === t.id);
+            const done = hs.filter(
+              (h) => getMark(h.id, today.key) === 'g'
+            ).length;
+            const selected =
+              !profileOpen && activeSection === 'rutin' && t.id === state.tab;
+            const inactiveGray = '#B6B6B6';
+            return (
+              <View {...dragControls.longPressDragProps}>
+              <TouchableOpacity
+                key={t.id}
+                accessibilityRole="tab"
+                accessibilityLabel={t.name}
+                accessibilityState={{ selected }}
+                accessibilityHint="Basılı tutup kaydır: sırala. Kaydırmadan bırak: sekme menüsü."
+                accessibilityActions={[{ name: 'decrement', label: 'Sola taşı' }, { name: 'increment', label: 'Sağa taşı' }, { name: 'longpress', label: 'Sekme menüsünü aç' }]}
+                onAccessibilityAction={(event) => {
+                  if (event.nativeEvent.actionName === 'decrement') moveCategory(t.id, -1);
+                  else if (event.nativeEvent.actionName === 'increment') moveCategory(t.id, 1);
+                  else if (event.nativeEvent.actionName === 'longpress') openCategoryMenu(t.id);
+                }}
+                activeOpacity={0.78}
+                onPress={() => { if (!dragControls.consumeLongPress()) handleSelectTab(t.id); }}
+                onLongPress={() => {}}
+                delayLongPress={450}
+                {...(Platform.OS === 'web' ? {
+                  onContextMenu: (event: React.MouseEvent) => {
+                    event.preventDefault();
+                    if ((event.nativeEvent as PointerEvent).pointerType !== 'touch') openCategoryMenu(t.id);
+                  },
+                  onKeyDown: (event: React.KeyboardEvent) => {
+                    if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+                      event.preventDefault(); openCategoryMenu(t.id);
+                    } else if (event.altKey && (event.key === 'ArrowLeft' || event.key === 'ArrowRight')) {
+                      event.preventDefault(); moveCategory(t.id, event.key === 'ArrowLeft' ? -1 : 1);
+                    }
+                  },
+                } : {})}
+                style={[
+                  styles.tabBtn,
+                  { width: categoryTabWidth },
+                  selected && {
+                    backgroundColor: withAlpha(t.color, 0.18),
+                    borderColor: theme.accent,
+                    shadowColor: theme.accent,
+                    shadowOpacity: 0.5,
+                    shadowRadius: 10,
+                    shadowOffset: { width: 0, height: 0 },
+                  },
+                ]}
+              >
+                {selected && <AccentSheen color={t.color} />}
+                {t.id.startsWith('custom-') || t.customIcon ? (
+                  <View style={!selected ? { filter: [{ grayscale: 1 }] } : undefined}>
+                    <Text style={{ fontSize: 25, lineHeight: 27, height: 27 }}>{t.emoji}</Text>
+                  </View>
+                ) : <CategoryIcon category={t.id} size={27} color={selected ? t.color : '#C6C6C6'} />}
+                <Text
+                  numberOfLines={1}
+                  style={[
+                    styles.tabName,
+                    {
+                      color: selected ? theme.text : inactiveGray,
+                      fontWeight: selected ? '700' : '600',
+                    },
+                  ]}
+                >
+                  {t.name}
+                </Text>
+                <View
+                  style={[
+                    styles.tabCountPill,
+                    {
+                      backgroundColor: selected
+                        ? t.color
+                        : theme.isDark
+                        ? 'rgba(161, 161, 170, 0.14)'
+                        : 'rgba(142, 142, 147, 0.15)',
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.tabCount,
+                      {
+                        color: selected
+                          ? t.theme.accentInk
+                          : inactiveGray,
+                      },
+                    ]}
+                  >
+                    {done}/{hs.length}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+              </View>
+            );
+          }} />
+          <TouchableOpacity
+            accessibilityRole="button"
+            accessibilityLabel="Yeni sekme ekle"
+            onPress={() => { setCategoryEditId(null); setCategoryEditorOpen(true); }}
+            style={[styles.addTabButton, { borderColor: withAlpha(theme.accent, 0.45), backgroundColor: withAlpha(theme.accent, 0.05) }]}
+          >
+            <Text style={{ color: theme.accent, fontSize: 30, lineHeight: 32 }}>＋</Text>
+            <Text style={{ color: theme.accent, fontSize: 10 }}>Yeni sekme</Text>
+          </TouchableOpacity>
+        </ScrollView>
+      </View>
+
+      </>)}
 
       {profileOpen ? (
         /* Profil Sayfası */
@@ -2972,146 +3117,6 @@ function GunlukPlanScreen() {
                 </View>
               )}
 
-              {/* İsteğe Bağlı Firebase Bulut Veritabanı Ayarları (Daraltılabilir) */}
-              <TouchableOpacity
-                onPress={() => {
-                  Haptics.selectionAsync().catch(() => {});
-                  setFirebaseSettingsOpen((prev) => !prev);
-                }}
-                activeOpacity={0.75}
-                style={{ marginTop: 14, paddingVertical: 6 }}
-              >
-                <Text
-                  style={{
-                    color: theme.muted,
-                    fontSize: 12.5,
-                    fontWeight: '700',
-                    textAlign: 'center',
-                  }}
-                >
-                  {firebaseSettingsOpen ? '▾' : '▸'} ⚙️ Firebase Bulut Veritabanı
-                  Bağlantı Ayarları{' '}
-                  {isFirebaseConfigured(fbConfig) ? '(Aktif)' : '(Simülasyon Modu)'}
-                </Text>
-              </TouchableOpacity>
-
-              {firebaseSettingsOpen && (
-                <View
-                  style={{
-                    marginTop: 8,
-                    paddingTop: 10,
-                    borderTopWidth: 1,
-                    borderTopColor: theme.isDark
-                      ? 'rgba(255,255,255,0.1)'
-                      : 'rgba(0,0,0,0.08)',
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.profileSectionDesc,
-                      { color: theme.muted, marginBottom: 8 },
-                    ]}
-                  >
-                    Kendi Firebase (Firestore & Auth) projenize bağlamak için
-                    Firebase Console üzerindeki Web API Anahtarınızı (apiKey) ve
-                    Proje Kimliğinizi (projectId) girebilirsiniz. Boş
-                    bırakıldığında uygulama hesap bazlı yerel bulut kasasını
-                    kullanır.
-                  </Text>
-
-                  <Text style={[styles.inputLabel, { color: theme.text }]}>
-                    Firebase Project ID
-                  </Text>
-                  <TextInput
-                    value={fbConfig.projectId}
-                    onChangeText={(v) =>
-                      setFbConfig((prev) => ({ ...prev, projectId: v }))
-                    }
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    placeholder="ornek: gunluk-plan-app"
-                    placeholderTextColor={theme.muted}
-                    style={[
-                      styles.textInput,
-                      {
-                        color: theme.text,
-                        backgroundColor: theme.isDark
-                          ? 'rgba(255,255,255,0.06)'
-                          : 'rgba(0,0,0,0.04)',
-                        borderColor: theme.isDark
-                          ? 'rgba(255,255,255,0.18)'
-                          : 'rgba(0,0,0,0.15)',
-                      },
-                    ]}
-                  />
-
-                  <Text style={[styles.inputLabel, { color: theme.text }]}>
-                    Firebase Web API Key
-                  </Text>
-                  <TextInput
-                    value={fbConfig.apiKey}
-                    onChangeText={(v) =>
-                      setFbConfig((prev) => ({ ...prev, apiKey: v }))
-                    }
-                    autoCapitalize="none"
-                    autoCorrect={false}
-                    placeholder="AIzaSy..."
-                    placeholderTextColor={theme.muted}
-                    style={[
-                      styles.textInput,
-                      {
-                        color: theme.text,
-                        backgroundColor: theme.isDark
-                          ? 'rgba(255,255,255,0.06)'
-                          : 'rgba(0,0,0,0.04)',
-                        borderColor: theme.isDark
-                          ? 'rgba(255,255,255,0.18)'
-                          : 'rgba(0,0,0,0.15)',
-                      },
-                    ]}
-                  />
-
-                  <TouchableOpacity
-                    onPress={handleSaveFirebaseSettings}
-                    activeOpacity={0.82}
-                    style={[
-                      styles.primaryBtn,
-                      styles.profileFullBtn,
-                      { backgroundColor: theme.accent, marginTop: 10 },
-                    ]}
-                  >
-                    <Text
-                      style={[
-                        styles.primaryBtnText,
-                        { color: theme.accentInk, fontSize: 14 },
-                      ]}
-                    >
-                      ✓ Bulut Bağlantı Ayarlarını Kaydet
-                    </Text>
-                  </TouchableOpacity>
-
-                  {fbConfigSavedBanner && (
-                    <View
-                      style={[
-                        styles.profileSavedToast,
-                        {
-                          backgroundColor: 'rgba(34, 197, 94, 0.15)',
-                          borderColor: MARK_COLORS.green,
-                        },
-                      ]}
-                    >
-                      <Text
-                        style={[
-                          styles.profileSavedToastText,
-                          { color: MARK_COLORS.green },
-                        ]}
-                      >
-                        ✓ Firebase bulut yapılandırması kaydedildi.
-                      </Text>
-                    </View>
-                  )}
-                </View>
-              )}
             </View>
 
             {/* Yedekle / Yedekten Yükle Bilgileri ve İşlemleri Kartı */}
@@ -3168,7 +3173,7 @@ function GunlukPlanScreen() {
                     Kayıtlı Alışkanlık:
                   </Text>
                   <Text style={[styles.backupInfoVal, { color: theme.text }]}>
-                    {state.habits.length} madde ({TABS.length} kategori)
+                    {state.habits.length} madde ({tabs.length} kategori)
                   </Text>
                 </View>
                 <View style={styles.backupInfoRow}>
@@ -3275,86 +3280,6 @@ function GunlukPlanScreen() {
             showsVerticalScrollIndicator={false}
             keyboardShouldPersistTaps="handled"
           >
-            {/* Görevler Üst Özet & Filtre Barı */}
-            <View
-              style={[
-                styles.hero,
-                {
-                  backgroundColor: theme.accent,
-                  borderRadius: theme.radius,
-                  shadowColor: theme.accent,
-                },
-              ]}
-            >
-              <SoftGradientOverlay
-                borderRadius={theme.radius}
-                startColor="rgba(255,255,255,0.22)"
-                endColor={theme.accentGradientEnd || 'rgba(0,0,0,0.2)'}
-              />
-              <View style={styles.heroTop}>
-                <View
-                  style={[
-                    styles.heroEmojiBadge,
-                    { backgroundColor: 'rgba(255,255,255,0.16)' },
-                  ]}
-                >
-                  <Text style={styles.heroEmoji}>✅</Text>
-                </View>
-                <View style={styles.heroTextWrap}>
-                  <Text
-                    style={[
-                      styles.heroTitle,
-                      {
-                        color: theme.accentInk,
-                        fontStyle: theme.headItalic ? 'italic' : 'normal',
-                      },
-                    ]}
-                  >
-                    Görevlerim
-                  </Text>
-                  <Text style={[styles.heroMotto, { color: theme.accentInk }]}>
-                    Yapılacakları ekle, alt görevlere böl ve tamamla.
-                  </Text>
-                </View>
-              </View>
-
-              <View style={styles.progressRow}>
-                <Text style={[styles.progressLabel, { color: theme.accentInk }]}>
-                  Tamamlanan {completedTasks.length}/{allTasks.length}
-                </Text>
-                <View
-                  style={[
-                    styles.progressBarBg,
-                    {
-                      backgroundColor: 'rgba(0,0,0,0.24)',
-                    },
-                  ]}
-                >
-                  <View
-                    style={[
-                      styles.progressBarFill,
-                      {
-                        width: `${
-                          allTasks.length
-                            ? Math.round(
-                                (completedTasks.length / allTasks.length) * 100
-                              )
-                            : 0
-                        }%`,
-                        backgroundColor: theme.accentInk,
-                      },
-                    ]}
-                  />
-                </View>
-                <Text style={[styles.progressLabel, { color: theme.accentInk }]}>
-                  %
-                  {allTasks.length
-                    ? Math.round((completedTasks.length / allTasks.length) * 100)
-                    : 0}
-                </Text>
-              </View>
-            </View>
-
             {/* Google Görevler Liste Sekmeleri (Görevlerim / ★ Yıldızlı) & Eylemler */}
             <View style={styles.toolbar}>
               <View style={styles.taskFilterTabs}>
@@ -3443,7 +3368,7 @@ function GunlukPlanScreen() {
                     >
                       <View style={styles.btnContentRow}>
                         {!taskReorderMode && (
-                          <MicroIcon name="sort" size={12} color={theme.muted} />
+                          <MicroIcon name="sort" size={14} color={theme.accent} />
                         )}
                         <Text
                           style={[
@@ -3537,7 +3462,7 @@ function GunlukPlanScreen() {
                       {
                         backgroundColor: theme.accent,
                         paddingVertical: 6,
-                        paddingHorizontal: 12,
+                        paddingHorizontal: 8,
                       },
                     ]}
                   >
@@ -3593,7 +3518,7 @@ function GunlukPlanScreen() {
                 style={styles.cardsList}
                 renderItem={(task, idx, dragControls) => {
                   const subtasks = task.subtasks || [];
-                  const isCompleting = completingTaskIds.includes(task.id);
+                  const isCompleting = false;
                   return (
                     <FadeSlideIn index={idx}>
                     <SwipeableTaskRow
@@ -3601,8 +3526,8 @@ function GunlukPlanScreen() {
                       borderRadius={theme.radius}
                       rightLabel="Tamamla"
                       leftLabel="Sil"
-                      rightColor={MARK_COLORS.green}
-                      leftColor={MARK_COLORS.red}
+                      rightColor={TASK_COMPLETE_COLOR}
+                      leftColor={TASKS_THEME.accentSoft}
                       onSwipeActiveChange={setListGestureActive}
                       onThresholdHaptic={() => {
                         Haptics.impactAsync(
@@ -3732,9 +3657,9 @@ function GunlukPlanScreen() {
                         {/* Yuvarlak Onay Kutusu (Google Tasks tarzı) */}
                         <AnimatedCheckCircle
                           checked={isCompleting}
-                          color={MARK_COLORS.green}
+                          color={TASK_COMPLETE_COLOR}
                           borderColor={theme.accent}
-                          onPress={() => handleCompleteTaskAnimated(task.id)}
+                          onPress={() => handleToggleTaskDone(task.id)}
                           accessibilityLabel={`${task.title} görevini tamamla`}
                           style={styles.taskCircleCheck}
                           tickStyle={styles.taskCircleTick}
@@ -3815,7 +3740,7 @@ function GunlukPlanScreen() {
                               styles.taskStarIcon,
                               {
                                 color: task.starred
-                                  ? '#f59e0b'
+                                  ? theme.accent
                                   : theme.muted,
                               },
                             ]}
@@ -3866,10 +3791,10 @@ function GunlukPlanScreen() {
                                   styles.taskSubCircle,
                                   {
                                     borderColor: st.done
-                                      ? MARK_COLORS.green
+                                      ? TASK_COMPLETE_COLOR
                                       : theme.muted,
                                     backgroundColor: st.done
-                                      ? MARK_COLORS.green
+                                      ? TASK_COMPLETE_COLOR
                                       : 'transparent',
                                   },
                                 ]}
@@ -3949,7 +3874,7 @@ function GunlukPlanScreen() {
                     <Text
                       style={[
                         styles.clearCompletedText,
-                        { color: MARK_COLORS.red },
+                        { color: theme.muted },
                       ]}
                     >
                       Tümünü sil
@@ -3965,8 +3890,8 @@ function GunlukPlanScreen() {
                         borderRadius={10}
                         rightLabel="Geri Al"
                         leftLabel="Sil"
-                        rightColor={MARK_COLORS.green}
-                        leftColor={MARK_COLORS.red}
+                        rightColor={TASK_COMPLETE_COLOR}
+                        leftColor={TASKS_THEME.accentSoft}
                         onSwipeActiveChange={setListGestureActive}
                         onThresholdHaptic={() => {
                           Haptics.impactAsync(
@@ -4000,8 +3925,8 @@ function GunlukPlanScreen() {
                           style={[
                             styles.taskCircleCheck,
                             {
-                              borderColor: MARK_COLORS.green,
-                              backgroundColor: MARK_COLORS.green,
+                              borderColor: TASK_COMPLETE_COLOR,
+                              backgroundColor: TASK_COMPLETE_COLOR,
                             },
                           ]}
                         >
@@ -4063,11 +3988,11 @@ function GunlukPlanScreen() {
                   <View
                     style={[
                       styles.dotSmall,
-                      { backgroundColor: MARK_COLORS.green },
+                      { backgroundColor: TASK_COMPLETE_COLOR },
                     ]}
                   />
                   <Text style={[styles.legendText, { color: theme.muted }]}>
-                    Sağa kaydır: yeşil dalga ile tamamla · Sola kaydır: sil
+                    Sağa kaydır: tamamla · Sola kaydır: sil
                   </Text>
                 </View>
                 <View style={styles.legendItem}>
@@ -4089,116 +4014,11 @@ function GunlukPlanScreen() {
         /* Ana İçerik (Günlük Rutin) */
         <ScrollView
           ref={mainScrollRef}
+          keyboardShouldPersistTaps="handled"
           style={styles.mainScroll}
           contentContainerStyle={styles.mainContent}
           showsVerticalScrollIndicator={false}
         >
-        {/* Hero Kartı (Yumuşak Gradyan & Derinlikli Gölge) */}
-        <FadeSlideIn key={`hero-${activeTab.id}`} style={styles.heroLayer}>
-        <PopOnChange value={celebrateKey} scaleTo={1.03}>
-        <View
-          style={[
-            styles.hero,
-            {
-              backgroundColor: theme.accent,
-              borderRadius: theme.radius,
-              shadowColor: theme.accent,
-            },
-          ]}
-        >
-          <SoftGradientOverlay
-            borderRadius={theme.radius}
-            startColor="rgba(255,255,255,0.24)"
-            endColor={theme.accentGradientEnd || 'rgba(0,0,0,0.2)'}
-          />
-          <View style={styles.heroTop}>
-            <View
-              style={[
-                styles.heroEmojiBadge,
-                {
-                  backgroundColor:
-                    theme.accentInk === '#111605'
-                      ? 'rgba(0,0,0,0.08)'
-                      : 'rgba(255,255,255,0.18)',
-                },
-              ]}
-            >
-              <Animated.Text style={[styles.heroEmoji, emojiAnimatedStyle]}>
-                {activeTab.emoji}
-              </Animated.Text>
-            </View>
-            <View style={styles.heroTextWrap}>
-              <Text
-                style={[
-                  styles.heroTitle,
-                  {
-                    color: theme.accentInk,
-                    fontStyle: theme.headItalic ? 'italic' : 'normal',
-                  },
-                ]}
-              >
-                {activeTab.name}
-              </Text>
-              <Text style={[styles.heroMotto, { color: theme.accentInk }]}>
-                {pct === 100 && tabHabits.length > 0
-                  ? 'Bugünün tüm hedefleri tamamlandı. Harikasın!'
-                  : activeTab.motto}
-              </Text>
-            </View>
-          </View>
-
-          <View style={styles.progressRow}>
-            <Text style={[styles.progressLabel, { color: theme.accentInk }]}>
-              Bugün {doneToday}/{tabHabits.length}
-            </Text>
-            <AnimatedProgressBar
-              pct={pct}
-              fillColor={theme.accentInk}
-              shimmerColor={
-                theme.accentInk === '#FFFFFF' || theme.accentInk === '#ffffff'
-                  ? withAlpha(theme.accent, 0.45)
-                  : 'rgba(255,255,255,0.45)'
-              }
-              trackStyle={[
-                styles.progressBarBg,
-                {
-                  backgroundColor:
-                    theme.accentInk === '#111605'
-                      ? 'rgba(0,0,0,0.16)'
-                      : 'rgba(255,255,255,0.26)',
-                },
-              ]}
-            />
-            <AnimatedNumber
-              value={pct}
-              prefix="%"
-              style={[
-                styles.progressLabel,
-                styles.progressPct,
-                { color: theme.accentInk },
-              ]}
-            />
-          </View>
-
-          <ConfettiBurst
-            trigger={celebrateKey}
-            colors={[
-              theme.accentInk,
-              MARK_COLORS.green,
-              '#facc15',
-              MARK_COLORS.blue,
-              '#ec4899',
-              '#f97316',
-            ]}
-            count={30}
-            spread={150}
-            size={8}
-            duration={1300}
-          />
-        </View>
-        </PopOnChange>
-        </FadeSlideIn>
-
         {/* Araç Çubuğu (Minimal Ay Seçici + Mikro-İkonlu Sırala + Madde Ekle) */}
         <View style={styles.toolbar}>
           <View
@@ -4215,7 +4035,7 @@ function GunlukPlanScreen() {
               style={styles.iconBtnMinimal}
               accessibilityLabel="Önceki ay"
             >
-              <Text style={[styles.iconBtnText, { color: theme.muted }]}>‹</Text>
+              <Text style={[styles.iconBtnText, { color: theme.accent }]}>‹</Text>
             </TouchableOpacity>
 
             <Text
@@ -4235,7 +4055,7 @@ function GunlukPlanScreen() {
               style={styles.iconBtnMinimal}
               accessibilityLabel="Sonraki ay"
             >
-              <Text style={[styles.iconBtnText, { color: theme.muted }]}>›</Text>
+              <Text style={[styles.iconBtnText, { color: theme.accent }]}>›</Text>
             </TouchableOpacity>
           </View>
 
@@ -4253,13 +4073,13 @@ function GunlukPlanScreen() {
                     backgroundColor: theme.accent,
                     shadowColor: theme.accent,
                     paddingVertical: 8,
-                    paddingHorizontal: 12,
+                    paddingHorizontal: 8,
                   }
                 : {
                     backgroundColor: theme.surface,
                     borderColor: theme.cardBorderColor,
                     paddingVertical: 8,
-                    paddingHorizontal: 12,
+                    paddingHorizontal: 8,
                   },
             ]}
             accessibilityLabel="Aylık görünümü aç veya kapat"
@@ -4279,7 +4099,7 @@ function GunlukPlanScreen() {
                   },
                 ]}
               >
-                {monthlyViewMode ? 'Aylık ✓' : 'Aylık Görünüm'}
+                {monthlyViewMode ? 'Aylık ✓' : windowWidth < 380 ? 'Aylık' : 'Aylık Görünüm'}
               </Text>
             </View>
           </TouchableOpacity>
@@ -4320,7 +4140,7 @@ function GunlukPlanScreen() {
               >
                 <View style={styles.btnContentRow}>
                   {!reorderMode && (
-                    <MicroIcon name="sort" size={12} color={theme.muted} />
+                    <MicroIcon name="sort" size={12} color={theme.accent} />
                   )}
                   <Text
                     style={[
@@ -4338,20 +4158,19 @@ function GunlukPlanScreen() {
 
             {!reorderMode && (
               <TouchableOpacity
+                accessibilityRole="button"
+                accessibilityLabel="Yeni alışkanlık ekle"
                 onPress={() => openEditor(null)}
                 style={[
-                  styles.primaryBtn,
+                  styles.neonAddBtn,
                   {
-                    backgroundColor: theme.accent,
+                    backgroundColor: withAlpha(theme.accent, 0.08),
+                    borderColor: theme.accent,
                     shadowColor: theme.accent,
                   },
                 ]}
               >
-                <Text
-                  style={[styles.primaryBtnText, { color: theme.accentInk }]}
-                >
-                  ＋ Yeni Ekle
-                </Text>
+                <PlusIcon color={theme.accent} />
               </TouchableOpacity>
             )}
           </View>
@@ -4391,875 +4210,18 @@ function GunlukPlanScreen() {
             accentColor={theme.accent}
             borderRadius={theme.radius}
             style={styles.cardsList}
-            renderItem={(h, i, dragControls) => {
-              const { cur, best } = reorderMode
-                ? { cur: 0, best: 0 }
-                : calculateStreaks(state.marks[h.id], today.key);
-              let monthDone = 0;
-              if (!reorderMode) {
-                for (let d = 1; d <= dim; d++) {
-                  if (getMark(h.id, dateKey(viewMonth.y, viewMonth.m, d)) === 'g') {
-                    monthDone++;
-                  }
-                }
-              }
-              const todayMark = getMark(h.id, today.key);
-              const todayMarkObj = todayMark ? MARKS[todayMark] : null;
-              const todayProg = getProgress(h.id, today.key);
-              const hasActiveGoal =
-                !!h.goal && h.goal.type !== 'none' && h.goal.target > 0;
-
-              let goalBadgeText = '';
-              let goalIconName: MicroIconName = 'timer';
-              if (hasActiveGoal && h.goal) {
-                if (h.goal.type === 'timer') {
-                  goalIconName = 'timer';
-                  goalBadgeText =
-                    todayProg > 0 && todayProg < h.goal.target
-                      ? `${formatDuration(todayProg)} / ${formatTimerReadable(h.goal.target)}`
-                      : `${formatTimerReadable(h.goal.target)}`;
-                } else if (h.goal.type === 'reps') {
-                  goalIconName = 'repeat';
-                  goalBadgeText = `${todayProg}/${h.goal.target} tekrar`;
-                } else if (h.goal.type === 'amount') {
-                  goalIconName = 'chart';
-                  goalBadgeText = `${todayProg}/${h.goal.target}${h.goal.unit ? ' ' + h.goal.unit : ''}`;
-                }
-              }
-
-              return (
-                <FadeSlideIn index={i}>
-                <SwipeableTaskRow
-                  disabled={reorderMode}
-                  enableRightSwipe={false}
-                  leftActionMode="bounce"
-                  leftLabel="Düzenle"
-                  leftIcon="✎"
-                  leftColor={theme.accent}
-                  borderRadius={theme.radius}
-                  ignoreSwipeRef={ignoreHabitSwipeRef}
-                  onSwipeActiveChange={setListGestureActive}
-                  onThresholdHaptic={() => {
-                    Haptics.impactAsync(
-                      Haptics.ImpactFeedbackStyle.Light
-                    ).catch(() => {});
-                  }}
-                  onSwipeLeft={() => {
-                    Haptics.impactAsync(
-                      Haptics.ImpactFeedbackStyle.Medium
-                    ).catch(() => {});
-                    openEditor(h);
-                  }}
-                >
-                <View
-                  style={[
-                    styles.card,
-                    reorderMode && styles.compactCard,
-                    {
-                      backgroundColor: theme.surface,
-                      borderRadius: theme.radius,
-                      borderColor: theme.cardBorderColor,
-                      borderWidth: theme.cardBorderWidth,
-                      shadowColor: theme.isDark ? '#000000' : theme.accent,
-                    },
-                  ]}
-                >
-                  {reorderMode && (
-                    <>
-                      <View
-                        {...dragControls.handleProps}
-                        style={[
-                          styles.dragHandleBadge,
-                          {
-                            backgroundColor: theme.isDark
-                              ? 'rgba(255,255,255,0.06)'
-                              : 'rgba(0,0,0,0.04)',
-                          },
-                        ]}
-                      >
-                        <Text style={{ color: theme.muted, fontSize: 16 }}>
-                          ⠿
-                        </Text>
-                      </View>
-                      <View
-                        {...dragControls.handleProps}
-                        style={styles.compactInfo}
-                      >
-                        <Text
-                          style={[
-                            styles.cardTitle,
-                            {
-                              color: theme.text,
-                              fontStyle: theme.headItalic ? 'italic' : 'normal',
-                            },
-                          ]}
-                        >
-                          {h.name}
-                        </Text>
-                        {!!h.detail && (
-                          <Text
-                            style={[styles.cardDetail, { color: theme.muted }]}
-                          >
-                            {h.detail}
-                          </Text>
-                        )}
-                      </View>
-                      <TouchableOpacity
-                        disabled={i === 0}
-                        onPress={() => moveHabit(h.id, -1)}
-                        style={[
-                          styles.iconBtn,
-                          {
-                            backgroundColor: theme.isDark
-                              ? 'rgba(255,255,255,0.05)'
-                              : 'rgba(0,0,0,0.04)',
-                            borderColor: 'transparent',
-                            opacity: i === 0 ? 0.3 : 1,
-                          },
-                        ]}
-                      >
-                        <Text style={{ color: theme.text, fontSize: 12 }}>▲</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity
-                        disabled={i === tabHabits.length - 1}
-                        onPress={() => moveHabit(h.id, 1)}
-                        style={[
-                          styles.iconBtn,
-                          {
-                            backgroundColor: theme.isDark
-                              ? 'rgba(255,255,255,0.05)'
-                              : 'rgba(0,0,0,0.04)',
-                            borderColor: 'transparent',
-                            opacity: i === tabHabits.length - 1 ? 0.3 : 1,
-                          },
-                        ]}
-                      >
-                        <Text style={{ color: theme.text, fontSize: 12 }}>▼</Text>
-                      </TouchableOpacity>
-                    </>
-                  )}
-
-                  <View style={reorderMode ? { display: 'none' } : undefined}>
-                  {/* Kart Üst Kısmı (Gelişmiş Tipografi + Mikro-İkonlu İstatistikler + Bugün Aktivite Çemberi) */}
-                  <View style={styles.cardHead}>
-                    {tabHabits.length > 1 && (
-                      <View
-                        {...dragControls.handleProps}
-                        accessibilityLabel="Sürükleyerek sırala"
-                        style={{
-                          paddingRight: 8,
-                          paddingVertical: 6,
-                          justifyContent: 'center',
-                        }}
-                      >
-                        <Text
-                          style={{
-                            color: theme.muted,
-                            fontSize: 16,
-                            opacity: 0.72,
-                          }}
-                        >
-                          ⠿
-                        </Text>
-                      </View>
-                    )}
-                    <View
-                      {...dragControls.longPressDragProps}
-                      style={styles.cardInfo}
-                    >
-                    <Pressable
-                      onPress={() => handleCardPress(h)}
-                    >
-                      <View style={styles.cardTitleGroup}>
-                        <Text
-                          style={[
-                            styles.cardTitle,
-                            {
-                              color: theme.text,
-                              fontStyle: theme.headItalic ? 'italic' : 'normal',
-                            },
-                          ]}
-                        >
-                          {h.name}
-                        </Text>
-                        {!!h.detail && (
-                          <Text
-                            style={[styles.cardDetail, { color: theme.muted }]}
-                          >
-                            {h.detail}
-                          </Text>
-                        )}
-                      </View>
-
-                      <View style={styles.cardStats}>
-                        <View
-                          style={[
-                            styles.statMicroPill,
-                            {
-                              backgroundColor: theme.isDark
-                                ? 'rgba(255,255,255,0.05)'
-                                : withAlpha(theme.accent, 0.08),
-                            },
-                          ]}
-                        >
-                          <StreakIcon streak={cur} color={theme.accent} />
-                          <Text style={[styles.statText, { color: theme.muted }]}>
-                            <Text style={[styles.statBold, { color: theme.text }]}>
-                              {cur}
-                            </Text>{' '}
-                            gün
-                          </Text>
-                        </View>
-
-                        <View
-                          style={[
-                            styles.statMicroPill,
-                            {
-                              backgroundColor: theme.isDark
-                                ? 'rgba(255,255,255,0.05)'
-                                : 'rgba(0,0,0,0.035)',
-                            },
-                          ]}
-                        >
-                          <MicroIcon
-                            name="trophy"
-                            size={12}
-                            color={theme.accent}
-                          />
-                          <Text style={[styles.statText, { color: theme.muted }]}>
-                            Rekor{' '}
-                            <Text style={[styles.statBold, { color: theme.text }]}>
-                              {best}
-                            </Text>
-                          </Text>
-                        </View>
-
-                        <View
-                          style={[
-                            styles.statMicroPill,
-                            {
-                              backgroundColor: theme.isDark
-                                ? 'rgba(255,255,255,0.05)'
-                                : 'rgba(0,0,0,0.035)',
-                            },
-                          ]}
-                        >
-                          <MicroIcon
-                            name="calendar"
-                            size={12}
-                            color={theme.accent}
-                          />
-                          <Text style={[styles.statText, { color: theme.muted }]}>
-                            <Text style={[styles.statBold, { color: theme.text }]}>
-                              {monthDone}
-                            </Text>
-                            /{dim}
-                          </Text>
-                        </View>
-
-                        {!!goalBadgeText && (
-                          <View
-                            style={[
-                              styles.goalChip,
-                              {
-                                backgroundColor: withAlpha(theme.accent, 0.12),
-                                borderColor: withAlpha(theme.accent, 0.3),
-                              },
-                            ]}
-                          >
-                            <MicroIcon
-                              name={goalIconName}
-                              size={11}
-                              color={theme.accent}
-                            />
-                            <Text
-                              style={[
-                                styles.goalChipText,
-                                { color: theme.text },
-                              ]}
-                            >
-                              {goalBadgeText}
-                            </Text>
-                          </View>
-                        )}
-                      </View>
-                    </Pressable>
-                    </View>
-
-                    {/* Bugün Aktivite Çemberi & Minimal Etiketi */}
-                    <View style={styles.cardActions}>
-                      <View style={styles.todayBtnWrap}>
-                        <View
-                          pointerEvents="none"
-                          style={[
-                            styles.todayBadge,
-                            {
-                              backgroundColor: todayMarkObj
-                                ? todayMarkObj.color
-                                : withAlpha(theme.accent, 0.14),
-                            },
-                          ]}
-                        >
-                          <Text
-                            allowFontScaling={false}
-                            style={[
-                              styles.todayBadgeText,
-                              {
-                                color: todayMarkObj ? '#ffffff' : theme.accent,
-                              },
-                            ]}
-                          >
-                            BUGÜN
-                          </Text>
-                        </View>
-                        <MarkPop
-                          mark={todayMark}
-                          color={todayMarkObj?.color}
-                          radiusStyle={{ borderRadius: 999 }}
-                          burst
-                          burstColors={[
-                            MARK_COLORS.green,
-                            theme.accent,
-                            '#facc15',
-                            '#ffffff',
-                          ]}
-                        >
-                        <Pressable
-                          onPress={() => handleCellPress(h, today.key)}
-                          onLongPress={() => handleCellLongPress(h, today.key)}
-                          delayLongPress={380}
-                          style={({ pressed }) => {
-                            const isPartialLiquid =
-                              hasActiveGoal &&
-                              !!h.goal &&
-                              (h.goal.type === 'amount' ||
-                                h.goal.type === 'reps') &&
-                              todayProg > 0 &&
-                              todayProg < h.goal.target &&
-                              todayMark === 'b';
-                            return [
-                              styles.todayBtn,
-                              {
-                                backgroundColor: isPartialLiquid
-                                  ? theme.isDark
-                                    ? 'rgba(14,165,233,0.12)'
-                                    : 'rgba(14,165,233,0.08)'
-                                  : todayMarkObj
-                                  ? todayMarkObj.color
-                                  : theme.isDark
-                                  ? 'rgba(255,255,255,0.06)'
-                                  : withAlpha(theme.accent, 0.08),
-                                borderColor: isPartialLiquid
-                                  ? '#38bdf8'
-                                  : todayMarkObj
-                                  ? 'rgba(255,255,255,0.32)'
-                                  : withAlpha(theme.accent, 0.55),
-                                shadowColor: todayMarkObj
-                                  ? todayMarkObj.color
-                                  : theme.accent,
-                                shadowOpacity: todayMarkObj ? 0.38 : 0.12,
-                                shadowRadius: todayMarkObj ? 10 : 5,
-                                shadowOffset: { width: 0, height: 4 },
-                                elevation: todayMarkObj ? 4 : 1,
-                                transform: [{ scale: pressed ? 0.91 : 1 }],
-                              },
-                            ];
-                          }}
-                        >
-                          {hasActiveGoal &&
-                            !!h.goal &&
-                            (h.goal.type === 'amount' ||
-                              h.goal.type === 'reps') &&
-                            todayProg > 0 &&
-                            todayProg < h.goal.target &&
-                            todayMark === 'b' && (
-                              <View
-                                pointerEvents="none"
-                                style={{
-                                  position: 'absolute',
-                                  top: 0,
-                                  left: 0,
-                                  right: 0,
-                                  bottom: 0,
-                                  borderRadius: 999,
-                                  overflow: 'hidden',
-                                }}
-                              >
-                                <View
-                                  style={{
-                                    position: 'absolute',
-                                    left: 0,
-                                    right: 0,
-                                    bottom: 0,
-                                    height: `${Math.min(
-                                      95,
-                                      Math.max(
-                                        12,
-                                        Math.round(
-                                          (todayProg / h.goal.target) * 100
-                                        )
-                                      )
-                                    )}%`,
-                                    backgroundColor: '#0ea5e9',
-                                    borderTopWidth: 2,
-                                    borderTopColor: '#bae6fd',
-                                  }}
-                                />
-                              </View>
-                            )}
-                          <Text
-                            style={[
-                              styles.todayBtnNum,
-                              {
-                                color: todayMarkObj ? '#ffffff' : theme.text,
-                              },
-                            ]}
-                          >
-                            {today.d}
-                          </Text>
-                          {todayMarkObj && (
-                            <View
-                              style={[
-                                styles.cellStatusBadge,
-                                {
-                                  backgroundColor: '#ffffff',
-                                },
-                              ]}
-                            >
-                              <Text
-                                style={[
-                                  styles.cellStatusSymbol,
-                                  { color: todayMarkObj.color },
-                                ]}
-                              >
-                                {todayMarkObj.symbol}
-                              </Text>
-                            </View>
-                          )}
-                        </Pressable>
-                        </MarkPop>
-                      </View>
-                    </View>
-                  </View>
-
-                  {/* Aktivite Çemberleri: Aylık Takvim Görünümü (3 Satır Kompakt) veya 7 Günlük Haftalık Görünüm */}
-                  {monthlyViewMode ? (
-                    (() => {
-                      const monthCols = 11;
-                      const mCellSize = Math.min(
-                        22,
-                        Math.max(
-                          18,
-                          Math.floor((cardInnerWidth - 50) / monthCols)
-                        )
-                      );
-                      const mCellGap = Math.max(
-                        4,
-                        Math.floor(
-                          (cardInnerWidth - mCellSize * monthCols) /
-                            (monthCols - 1)
-                        )
-                      );
-                      const mLinkH = 11;
-
-                      return (
-                        <View
-                          style={{
-                            marginTop: 6,
-                            marginBottom: -4,
-                            gap: 4,
-                            alignSelf: 'center',
-                            width: cardInnerWidth,
-                          }}
-                        >
-                          {[0, 1, 2].map((rowIdx) => {
-                            const rowDays = daysArray.slice(
-                              rowIdx * monthCols,
-                              (rowIdx + 1) * monthCols
-                            );
-                            if (rowDays.length === 0) return null;
-
-                            return (
-                              <View
-                                key={`m-row-${rowIdx}`}
-                                style={{
-                                  flexDirection: 'row',
-                                  alignItems: 'center',
-                                  gap: mCellGap,
-                                  position: 'relative',
-                                  height: mCellSize,
-                                }}
-                              >
-                                {rowDays.map((d) => {
-                                  const k = dateKey(
-                                    viewMonth.y,
-                                    viewMonth.m,
-                                    d
-                                  );
-                                  const mark = getMark(h.id, k);
-                                  const markObj = mark ? MARKS[mark] : null;
-                                  const isFuture = k > today.key;
-                                  const isToday = k === today.key;
-                                  const prevMark =
-                                    d > 1
-                                      ? getMark(
-                                          h.id,
-                                          dateKey(
-                                            viewMonth.y,
-                                            viewMonth.m,
-                                            d - 1
-                                          )
-                                        )
-                                      : null;
-                                  const nextMark =
-                                    d < dim
-                                      ? getMark(
-                                          h.id,
-                                          dateKey(
-                                            viewMonth.y,
-                                            viewMonth.m,
-                                            d + 1
-                                          )
-                                        )
-                                      : null;
-                                  const inGreenChain =
-                                    mark === 'g' &&
-                                    (prevMark === 'g' || nextMark === 'g');
-
-                                  return (
-                                    <View
-                                      key={k}
-                                      style={{
-                                        width: mCellSize,
-                                        height: mCellSize,
-                                        position: 'relative',
-                                      }}
-                                    >
-                                      <Pressable
-                                        disabled={isFuture}
-                                        onPress={() => handleCellPress(h, k)}
-                                        onLongPress={() =>
-                                          handleCellLongPress(h, k)
-                                        }
-                                        delayLongPress={380}
-                                        style={[
-                                          styles.chainCell,
-                                          {
-                                            width: mCellSize,
-                                            height: mCellSize,
-                                            borderRadius: mCellSize / 2,
-                                            backgroundColor: markObj
-                                              ? markObj.color
-                                              : isToday
-                                              ? withAlpha(theme.accent, 0.14)
-                                              : theme.isDark
-                                              ? 'rgba(255,255,255,0.055)'
-                                              : 'rgba(0,0,0,0.04)',
-                                            borderColor: inGreenChain
-                                              ? 'rgba(167, 243, 208, 0.72)'
-                                              : markObj
-                                              ? 'rgba(255,255,255,0.28)'
-                                              : isToday
-                                              ? theme.accent
-                                              : theme.isDark
-                                              ? 'rgba(255,255,255,0.07)'
-                                              : 'rgba(0,0,0,0.04)',
-                                            borderWidth: inGreenChain
-                                              ? 1.4
-                                              : isToday && !markObj
-                                              ? 1.6
-                                              : 1,
-                                            opacity: isFuture ? 0.3 : 1,
-                                          },
-                                        ]}
-                                      >
-                                        <Text
-                                          allowFontScaling={false}
-                                          style={{
-                                            fontSize: 9.5,
-                                            fontVariant: ['tabular-nums'],
-                                            color: markObj
-                                              ? '#ffffff'
-                                              : isToday
-                                              ? theme.accent
-                                              : theme.muted,
-                                            fontWeight:
-                                              markObj || isToday
-                                                ? '800'
-                                                : '600',
-                                          }}
-                                        >
-                                          {d}
-                                        </Text>
-                                        {markObj && (
-                                          <View
-                                            style={{
-                                              position: 'absolute',
-                                              right: -1.5,
-                                              bottom: -1.5,
-                                              width: 8.5,
-                                              height: 8.5,
-                                              borderRadius: 4.25,
-                                              backgroundColor: '#ffffff',
-                                              alignItems: 'center',
-                                              justifyContent: 'center',
-                                            }}
-                                          >
-                                            <Text
-                                              allowFontScaling={false}
-                                              style={{
-                                                fontSize: 6,
-                                                fontWeight: '900',
-                                                color: markObj.color,
-                                                lineHeight: 7,
-                                              }}
-                                            >
-                                              {markObj.symbol}
-                                            </Text>
-                                          </View>
-                                        )}
-                                      </Pressable>
-                                    </View>
-                                  );
-                                })}
-
-                                {/* Satır İçi 3B Metalik Zincir & Lazer Dalgası Köprüleri */}
-                                {rowDays.map((d, colIdx) => {
-                                  if (
-                                    colIdx >= rowDays.length - 1 ||
-                                    d >= dim
-                                  ) {
-                                    return null;
-                                  }
-                                  const k = dateKey(
-                                    viewMonth.y,
-                                    viewMonth.m,
-                                    d
-                                  );
-                                  const mark = getMark(h.id, k);
-                                  const nextMark = getMark(
-                                    h.id,
-                                    dateKey(viewMonth.y, viewMonth.m, d + 1)
-                                  );
-                                  const linkActive =
-                                    mark === 'g' && nextMark === 'g';
-                                  const linkColor =
-                                    mark === 'g' && nextMark === 'g'
-                                      ? MARK_COLORS.green
-                                      : mark === 'b' && nextMark === 'b'
-                                      ? MARK_COLORS.blue
-                                      : MARK_COLORS.green;
-
-                                  return (
-                                    <ChainLink
-                                      key={`m-link-${k}`}
-                                      active={linkActive}
-                                      color={linkColor}
-                                      trackColor={
-                                        theme.isDark
-                                          ? 'rgba(255,255,255,0.08)'
-                                          : 'rgba(0,0,0,0.06)'
-                                      }
-                                      width={mCellGap}
-                                      height={mLinkH}
-                                      delay={14}
-                                      stepIndex={d}
-                                      style={{
-                                        position: 'absolute',
-                                        left:
-                                          (colIdx + 1) * mCellSize +
-                                          colIdx * mCellGap,
-                                        top: (mCellSize - mLinkH) / 2,
-                                        elevation: 6,
-                                      }}
-                                    />
-                                  );
-                                })}
-                              </View>
-                            );
-                          })}
-                        </View>
-                      );
-                    })()
-                  ) : (
-                  <HabitWeekScroll
-                    initialScrollX={initialScrollX}
-                    rowViewportWidth={rowViewportWidth}
-                    cellStep={cellStep}
-                    scrollKey={scrollKey}
-                    onTouchChange={(t) => {
-                      ignoreHabitSwipeRef.current = t;
-                    }}
-                  >
-                    {daysArray.map((d) => {
-                      const k = dateKey(viewMonth.y, viewMonth.m, d);
-                      const mark = getMark(h.id, k);
-                      const markObj = mark ? MARKS[mark] : null;
-                      const isFuture = k > today.key;
-                      const isToday = k === today.key;
-                      const prevMark =
-                        d > 1
-                          ? getMark(
-                              h.id,
-                              dateKey(viewMonth.y, viewMonth.m, d - 1)
-                            )
-                          : null;
-                      const nextMark =
-                        d < dim
-                          ? getMark(
-                              h.id,
-                              dateKey(viewMonth.y, viewMonth.m, d + 1)
-                            )
-                          : null;
-                      const inGreenChain =
-                        mark === 'g' && (prevMark === 'g' || nextMark === 'g');
-
-                      return (
-                        <View
-                          key={k}
-                          style={{
-                            width: cellSize,
-                            height: cellSize,
-                            position: 'relative',
-                          }}
-                        >
-                          <Pressable
-                            disabled={isFuture}
-                            onPress={() => handleCellPress(h, k)}
-                            onLongPress={() => handleCellLongPress(h, k)}
-                            delayLongPress={380}
-                            style={[
-                              styles.chainCell,
-                              {
-                                width: cellSize,
-                                height: cellSize,
-                                borderRadius: cellSize / 2,
-                                backgroundColor: markObj
-                                  ? markObj.color
-                                  : isToday
-                                  ? withAlpha(theme.accent, 0.12)
-                                  : theme.isDark
-                                  ? 'rgba(255,255,255,0.055)'
-                                  : 'rgba(0,0,0,0.04)',
-                                borderColor: inGreenChain
-                                  ? 'rgba(167, 243, 208, 0.72)'
-                                  : markObj
-                                  ? 'rgba(255,255,255,0.28)'
-                                  : isToday
-                                  ? theme.accent
-                                  : theme.isDark
-                                  ? 'rgba(255,255,255,0.07)'
-                                  : 'rgba(0,0,0,0.04)',
-                                borderWidth: inGreenChain
-                                  ? 1.8
-                                  : isToday && !markObj
-                                  ? 2
-                                  : 1.2,
-                                shadowColor: markObj
-                                  ? markObj.color
-                                  : 'transparent',
-                                shadowOffset: { width: 0, height: 1 },
-                                shadowOpacity: inGreenChain
-                                  ? 0.14
-                                  : markObj
-                                  ? 0.1
-                                  : 0,
-                                shadowRadius: inGreenChain
-                                  ? 3.5
-                                  : markObj
-                                  ? 2.5
-                                  : 0,
-                                elevation: markObj ? 1 : 0,
-                                opacity: isFuture ? 0.3 : 1,
-                              },
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.chainCellText,
-                                {
-                                  color: markObj
-                                    ? '#ffffff'
-                                    : isToday
-                                    ? theme.accent
-                                    : theme.muted,
-                                  fontWeight:
-                                    markObj || isToday ? '800' : '600',
-                                },
-                              ]}
-                            >
-                              {d}
-                            </Text>
-                            {markObj && (
-                              <View
-                                style={[
-                                  styles.cellStatusBadge,
-                                  { backgroundColor: '#ffffff' },
-                                ]}
-                              >
-                                <Text
-                                  style={[
-                                    styles.cellStatusSymbol,
-                                    { color: markObj.color },
-                                  ]}
-                                >
-                                  {markObj.symbol}
-                                </Text>
-                              </View>
-                            )}
-                          </Pressable>
-                        </View>
-                      );
-                    })}
-
-                    {/* 3B Metalik Zincir & Lazer Dalgası Köprü Katmanı (Hücrelerin üstünde, dokunmayı engellemez) */}
-                    {daysArray.map((d) => {
-                      if (d >= dim) return null;
-                      const k = dateKey(viewMonth.y, viewMonth.m, d);
-                      const mark = getMark(h.id, k);
-                      const nextMark = getMark(
-                        h.id,
-                        dateKey(viewMonth.y, viewMonth.m, d + 1)
-                      );
-                      const linkActive = mark === 'g' && nextMark === 'g';
-                      const linkColor =
-                        mark === 'g' && nextMark === 'g'
-                          ? MARK_COLORS.green
-                          : mark === 'b' && nextMark === 'b'
-                          ? MARK_COLORS.blue
-                          : MARK_COLORS.green;
-
-                      return (
-                        <ChainLink
-                          key={`link-${k}`}
-                          active={linkActive}
-                          color={linkColor}
-                          trackColor={
-                            theme.isDark
-                              ? 'rgba(255,255,255,0.08)'
-                              : 'rgba(0,0,0,0.06)'
-                          }
-                          width={cellGap}
-                          height={18}
-                          delay={18}
-                          stepIndex={d}
-                          style={{
-                            position: 'absolute',
-                            left: 10 + d * cellSize + (d - 1) * cellGap,
-                            top: 12 + (cellSize - 18) / 2,
-                            elevation: 6,
-                          }}
-                        />
-                      );
-                    })}
-                  </HabitWeekScroll>
-                  )}
-                  </View>
-                </View>
-                </SwipeableTaskRow>
-                </FadeSlideIn>
-              );
-            }}
+            renderItem={(h, i, dragControls) => (
+              <HabitCard
+                h={h} i={i} dragControls={dragControls} habitCount={tabHabits.length}
+                habitMarks={state.marks[h.id]} habitProgress={state.progress?.[h.id]}
+                reorderMode={reorderMode} monthlyViewMode={monthlyViewMode}
+                today={today} viewMonth={viewMonth} theme={theme} windowWidth={windowWidth}
+                dim={dim} daysArray={daysArray} cardInnerWidth={cardInnerWidth}
+                cellSize={cellSize} cellGap={cellGap} rowViewportWidth={rowViewportWidth}
+                cellStep={cellStep} initialScrollX={initialScrollX} scrollKey={scrollKey}
+                ignoreHabitSwipeRef={ignoreHabitSwipeRef} actions={habitCardActions}
+              />
+            )}
           />
         )}
 
@@ -5287,134 +4249,30 @@ function GunlukPlanScreen() {
       </ScrollView>
       )}
 
-      {/* Alt Sekme Çubuğu (Glassmorphism Bottom Tab Bar) */}
-      <View
-        style={[
-          styles.bottomTabBar,
-          {
-            backgroundColor:
-              theme.surfaceGlass ||
-              withAlpha(theme.surface, theme.isDark ? 0.82 : 0.86),
-            borderTopColor: theme.isDark
-              ? 'rgba(255,255,255,0.08)'
-              : 'rgba(0,0,0,0.06)',
-            paddingBottom: Math.max(insets.bottom, 8),
-          },
-          Platform.OS === 'web'
-            ? ({
-                backdropFilter: 'blur(22px)',
-                WebkitBackdropFilter: 'blur(22px)',
-              } as any)
-            : null,
-        ]}
-      >
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={styles.tabsScroll}
-        >
-          {TABS.map((t) => {
-            const hs = state.habits.filter((h) => h.tab === t.id);
-            const done = hs.filter(
-              (h) => getMark(h.id, today.key) === 'g'
-            ).length;
-            const selected =
-              !profileOpen && activeSection === 'rutin' && t.id === state.tab;
-            const inactiveGray = theme.isDark ? '#71717a' : '#8e8e93';
-            return (
-              <TouchableOpacity
-                key={t.id}
-                activeOpacity={0.78}
-                onPress={() => handleSelectTab(t.id)}
-                style={[
-                  styles.tabBtn,
-                  selected && {
-                    backgroundColor: withAlpha(t.color, theme.isDark ? 0.16 : 0.12),
-                    borderColor: withAlpha(t.color, 0.28),
-                  },
-                ]}
-              >
-                <PopOnChange value={selected} when={selected} scaleTo={1.24} lift={3}>
-                  <View
-                    style={[
-                      styles.tabEmojiWrap,
-                      !selected && styles.tabEmojiInactive,
-                    ]}
-                  >
-                    <Text style={styles.tabEmoji}>{t.emoji}</Text>
-                    {!selected && Platform.OS !== 'web' && (
-                      <View
-                        pointerEvents="none"
-                        style={styles.tabEmojiGrayscaleClip}
-                      >
-                        <Text
-                          style={[
-                            styles.tabEmoji,
-                            styles.tabEmojiShadowClone,
-                          ]}
-                        >
-                          {t.emoji}
-                        </Text>
-                      </View>
-                    )}
-                  </View>
-                </PopOnChange>
-                <Text
-                  numberOfLines={1}
-                  style={[
-                    styles.tabName,
-                    {
-                      color: selected ? theme.text : inactiveGray,
-                      fontWeight: selected ? '700' : '600',
-                    },
-                  ]}
-                >
-                  {t.name}
-                </Text>
-                <View
-                  style={[
-                    styles.tabCountPill,
-                    {
-                      backgroundColor: selected
-                        ? t.color
-                        : theme.isDark
-                        ? 'rgba(161, 161, 170, 0.14)'
-                        : 'rgba(142, 142, 147, 0.15)',
-                    },
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.tabCount,
-                      {
-                        color: selected
-                          ? t.theme.accentInk
-                          : inactiveGray,
-                      },
-                    ]}
-                  >
-                    {done}/{hs.length}
-                  </Text>
-                </View>
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
-
       {/* Basılı Tutunca Açılan Renk Menüsü */}
+      <CategoryEditor visible={categoryEditorOpen} editingTab={tabs.find((tab) => tab.id === categoryEditId)} existingNames={tabs.filter((tab) => tab.id !== categoryEditId).map((tab) => tab.name)} onCancel={() => { setCategoryEditorOpen(false); setCategoryEditId(null); }} onCreate={handleSaveCategory} />
+      <CategoryActions
+        tab={tabs.find((tab) => tab.id === categoryMenuId) || null}
+        habitCount={state.habits.filter((habit) => habit.tab === categoryMenuId).length}
+        canDelete={tabs.length > 1}
+        onClose={() => setCategoryMenuId(null)}
+        onEdit={handleEditCategory}
+        onDelete={handleDeleteTab}
+      />
       {!!menuTarget && (
       <Modal
         visible
         transparent
-        animationType="fade"
+        animationType="none"
         onRequestClose={() => setMenuTarget(null)}
       >
+        <SheetBackdrop />
         <Pressable
           style={styles.modalBackdrop}
           onPress={() => setMenuTarget(null)}
         >
           <SheetPressable
+            onDismiss={() => setMenuTarget(null)}
             style={[
               styles.menuSheet,
               {
@@ -5426,6 +4284,7 @@ function GunlukPlanScreen() {
             ]}
             onPress={(e) => e.stopPropagation()}
           >
+            <ScrollView style={{ flexShrink: 1 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
             {menuTarget && (
               <>
                 <Text style={[styles.menuTitle, { color: theme.muted }]}>
@@ -5501,6 +4360,7 @@ function GunlukPlanScreen() {
                 </TouchableOpacity>
               </>
             )}
+            </ScrollView>
           </SheetPressable>
         </Pressable>
       </Modal>
@@ -5511,9 +4371,10 @@ function GunlukPlanScreen() {
       <Modal
         visible
         transparent
-        animationType="fade"
+        animationType="none"
         onRequestClose={() => setEditorOpen(false)}
       >
+        <SheetBackdrop />
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.modalBackdrop}
@@ -5523,6 +4384,7 @@ function GunlukPlanScreen() {
             onPress={() => setEditorOpen(false)}
           >
             <SheetPressable
+              onDismiss={() => setEditorOpen(false)}
               style={[
                 styles.editorCard,
                 {
@@ -5550,9 +4412,23 @@ function GunlukPlanScreen() {
                 </Text>
 
                 <Text style={[styles.inputLabel, { color: theme.text }]}>
-                  Madde adı
+                  Madde adı ve emoji
                 </Text>
+                <View style={styles.habitIdentityRow}>
+                  <TouchableOpacity
+                    accessibilityRole="button"
+                    accessibilityLabel="Emoji seç"
+                    accessibilityState={{ expanded: emojiPickerOpen }}
+                    onPress={() => setEmojiPickerOpen((open) => !open)}
+                    style={[styles.emojiPickerTrigger, { backgroundColor: theme.accentSoft, borderColor: theme.accent }]}
+                  >
+                    <Text style={styles.emojiPickerPreview}>
+                      {habitEmojiChoice || habitEmoji(habitName, editingHabit?.tab || state.tab)}
+                    </Text>
+                    <Text style={{ color: theme.accent, fontSize: 10 }}>▾</Text>
+                  </TouchableOpacity>
                 <TextInput
+                  accessibilityLabel="Madde adı"
                   value={habitName}
                   onChangeText={setHabitName}
                   maxLength={60}
@@ -5560,6 +4436,7 @@ function GunlukPlanScreen() {
                   placeholderTextColor={theme.muted}
                   style={[
                     styles.textInput,
+                    styles.habitNameInput,
                     {
                       color: theme.text,
                       backgroundColor: theme.isDark
@@ -5571,6 +4448,44 @@ function GunlukPlanScreen() {
                     },
                   ]}
                 />
+                </View>
+
+                {emojiPickerOpen && (
+                  <View style={[styles.emojiPickerPanel, { borderColor: theme.cardBorderColor }]}>
+                    <View style={styles.emojiPickerHeader}>
+                      <Text style={[styles.inputLabel, { color: theme.text, marginBottom: 0 }]}>Emoji seç</Text>
+                      <TouchableOpacity
+                        accessibilityRole="button"
+                        accessibilityLabel="Otomatik emoji kullan"
+                        onPress={() => { setHabitEmojiChoice(''); setEmojiPickerOpen(false); }}
+                        style={{ paddingVertical: 8, paddingHorizontal: 4 }}
+                      >
+                        <Text style={{ color: theme.accent, fontSize: 12 }}>Otomatik</Text>
+                      </TouchableOpacity>
+                    </View>
+                    <View style={styles.emojiPickerGrid}>
+                      {HABIT_EMOJIS.map((option) => (
+                        <TouchableOpacity
+                          key={option.emoji}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Emoji: ${option.label}`}
+                          accessibilityState={{ selected: habitEmojiChoice === option.emoji }}
+                          onPress={() => {
+                            Haptics.selectionAsync().catch(() => {});
+                            setHabitEmojiChoice(option.emoji);
+                            setEmojiPickerOpen(false);
+                          }}
+                          style={[styles.emojiPickerOption, {
+                            borderColor: habitEmojiChoice === option.emoji ? theme.accent : 'transparent',
+                            backgroundColor: habitEmojiChoice === option.emoji ? theme.accentSoft : 'rgba(255,255,255,0.04)',
+                          }]}
+                        >
+                          <Text style={{ fontSize: 24 }}>{option.emoji}</Text>
+                        </TouchableOpacity>
+                      ))}
+                    </View>
+                  </View>
+                )}
 
                 <Text style={[styles.inputLabel, { color: theme.text }]}>
                   Hedef / not{' '}
@@ -5598,29 +4513,21 @@ function GunlukPlanScreen() {
                   ]}
                 />
 
-                {/* Sayaç / Tekrar / Miktar Seçimi */}
-                <Text style={[styles.inputLabel, { color: theme.text }]}>
-                  Sayaç / Tekrar / Miktar
-                </Text>
-                <View style={styles.goalTypeGrid}>
-                  {(
-                    [
-                      [
-                        { id: 'none', label: 'Yok' },
-                        { id: 'timer', label: '⏱️ Sayaç' },
-                      ],
-                      [
-                        { id: 'reps', label: '🔁 Tekrar' },
-                        { id: 'amount', label: '📊 Miktar' },
-                      ],
-                    ] as { id: GoalType; label: string }[][]
-                  ).map((row, rowIdx) => (
-                    <View key={rowIdx} style={styles.goalTypeRow}>
-                      {row.map((opt) => {
+                {/* Hedef türü: tek satırda, yalnızca ikonlar. */}
+                <View style={styles.goalTypeRow} accessibilityLabel="Hedef türü">
+                  {([
+                    { id: 'none', label: 'Hedef yok', icon: '⊘' },
+                    { id: 'timer', label: 'Sayaç', icon: '⏱️' },
+                    { id: 'reps', label: 'Tekrar', icon: '🔁' },
+                    { id: 'amount', label: 'Miktar', icon: '📊' },
+                  ] as { id: GoalType; label: string; icon: string }[]).map((opt) => {
                         const active = goalType === opt.id;
                         return (
                           <TouchableOpacity
                             key={opt.id}
+                            accessibilityRole="button"
+                            accessibilityLabel={opt.label}
+                            accessibilityState={{ selected: active }}
                             activeOpacity={0.8}
                             onPress={() => {
                               Haptics.selectionAsync().catch(() => {});
@@ -5642,22 +4549,10 @@ function GunlukPlanScreen() {
                               },
                             ]}
                           >
-                            <Text
-                              numberOfLines={1}
-                              style={[
-                                styles.goalTypeBtnText,
-                                {
-                                  color: active ? theme.accentInk : theme.text,
-                                },
-                              ]}
-                            >
-                              {opt.label}
-                            </Text>
+                            <Text style={[styles.goalTypeBtnText, { color: active ? theme.accentInk : theme.text }]}>{opt.icon}</Text>
                           </TouchableOpacity>
                         );
-                      })}
-                    </View>
-                  ))}
+                  })}
                 </View>
 
                 {goalType === 'timer' && (
@@ -6143,9 +5038,10 @@ function GunlukPlanScreen() {
       <Modal
         visible
         transparent
-        animationType="fade"
+        animationType="none"
         onRequestClose={closeActionModal}
       >
+        <SheetBackdrop />
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.modalBackdrop}
@@ -6155,6 +5051,7 @@ function GunlukPlanScreen() {
             onPress={closeActionModal}
           >
             <SheetPressable
+              onDismiss={closeActionModal}
               style={[
                 styles.editorCard,
                 {
@@ -6164,6 +5061,7 @@ function GunlukPlanScreen() {
               ]}
               onPress={(e) => e.stopPropagation()}
             >
+              <ScrollView style={{ flexShrink: 1 }} showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
               {actionHabit && actionHabit.goal && (
                 <>
                   <View style={styles.actionModalHeader}>
@@ -6189,6 +5087,8 @@ function GunlukPlanScreen() {
                       )}
                     </View>
                     <TouchableOpacity
+                      accessibilityRole="button"
+                      accessibilityLabel="Maddeyi düzenle"
                       onPress={() => {
                         const h = actionHabit;
                         closeActionModal();
@@ -6320,11 +5220,10 @@ function GunlukPlanScreen() {
                             ].map((adj) => (
                               <TouchableOpacity
                                 key={adj.label}
+                                disabled={!timersReady}
                                 onPress={() => {
                                   Haptics.selectionAsync().catch(() => {});
-                                  setTimerRemaining((prev) =>
-                                    Math.max(0, prev + adj.delta)
-                                  );
+                                  timers.adjust(actionHabit.id, today.key, targetSec, timerRemaining, adj.delta);
                                 }}
                                 style={[
                                   styles.presetChip,
@@ -6349,16 +5248,12 @@ function GunlukPlanScreen() {
 
                           <View style={styles.timerControlsRow}>
                             <TouchableOpacity
+                              disabled={!timersReady}
                               onPress={() => {
                                 Haptics.impactAsync(
                                   Haptics.ImpactFeedbackStyle.Medium
                                 ).catch(() => {});
-                                if (timerRemaining <= 0) {
-                                  setTimerRemaining(targetSec);
-                                  setTimerRunning(true);
-                                } else {
-                                  setTimerRunning((r) => !r);
-                                }
+                                timers.toggle(actionHabit.id, today.key, targetSec, timerRemaining);
                               }}
                               style={[
                                 styles.primaryBtn,
@@ -6383,15 +5278,10 @@ function GunlukPlanScreen() {
                             </TouchableOpacity>
 
                             <TouchableOpacity
+                              disabled={!timersReady}
                               onPress={() => {
                                 Haptics.selectionAsync().catch(() => {});
-                                setTimerRunning(false);
-                                setTimerRemaining(targetSec);
-                                setProgressAndAutoMark(
-                                  actionHabit,
-                                  today.key,
-                                  0
-                                );
+                                timers.reset(actionHabit.id, today.key, targetSec);
                               }}
                               style={[
                                 styles.ghostBtn,
@@ -6415,17 +5305,12 @@ function GunlukPlanScreen() {
 
                           <View style={styles.actionFooterRow}>
                             <TouchableOpacity
+                              disabled={!timersReady}
                               onPress={() => {
                                 Haptics.notificationAsync(
                                   Haptics.NotificationFeedbackType.Success
                                 ).catch(() => {});
-                                setTimerRunning(false);
-                                setTimerRemaining(0);
-                                setProgressAndAutoMark(
-                                  actionHabit,
-                                  today.key,
-                                  targetSec
-                                );
+                                timers.reset(actionHabit.id, actionTimer?.dateKey || today.key, targetSec, true);
                                 closeActionModal();
                               }}
                               style={[
@@ -6723,6 +5608,7 @@ function GunlukPlanScreen() {
                   )}
                 </>
               )}
+              </ScrollView>
             </SheetPressable>
           </Pressable>
         </KeyboardAvoidingView>
@@ -6734,12 +5620,13 @@ function GunlukPlanScreen() {
       <Modal
         visible
         transparent
-        animationType="fade"
+        animationType="none"
         onRequestClose={() => {
           if (taskDatePickerOpen) setTaskDatePickerOpen(false);
           else setTaskModalOpen(false);
         }}
       >
+        <SheetBackdrop />
         <KeyboardAvoidingView
           behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
           style={styles.modalBackdrop}
@@ -6752,11 +5639,15 @@ function GunlukPlanScreen() {
             }}
           >
             <SheetPressable
+              onDismiss={() => {
+                if (taskDatePickerOpen) setTaskDatePickerOpen(false);
+                else setTaskModalOpen(false);
+              }}
               style={[
                 styles.editorCard,
                 {
-                  backgroundColor: '#3D0000',
-                  borderColor: '#950101',
+                  backgroundColor: '#1C1C1C',
+                  borderColor: '#484848',
                   borderWidth: 1.5,
                   borderRadius: theme.radius,
                   maxHeight: '90%',
@@ -6779,7 +5670,7 @@ function GunlukPlanScreen() {
                       }}
                       style={styles.backToHomeBtn}
                     >
-                      <Text style={[styles.backToHomeArrow, { color: '#FF0000' }]}>
+                      <Text style={[styles.backToHomeArrow, { color: '#767676' }]}>
                         ‹
                       </Text>
                       <Text
@@ -6880,10 +5771,10 @@ function GunlukPlanScreen() {
                                       isTod &&
                                         !isSel && {
                                           borderWidth: 1.5,
-                                          borderColor: '#FF0000',
+                                          borderColor: '#767676',
                                         },
                                       isSel && {
-                                        backgroundColor: '#FF0000',
+                                        backgroundColor: '#767676',
                                       },
                                     ]}
                                   >
@@ -6922,9 +5813,9 @@ function GunlukPlanScreen() {
                           styles.timeToggleBtn,
                           {
                             backgroundColor: pickerHasTime
-                              ? '#FF0000'
-                              : '#3D0000',
-                            borderColor: pickerHasTime ? '#FF0000' : '#950101',
+                              ? '#767676'
+                              : '#1C1C1C',
+                            borderColor: pickerHasTime ? '#767676' : '#484848',
                           },
                         ]}
                       >
@@ -6996,10 +5887,10 @@ function GunlukPlanScreen() {
                       }}
                       style={[
                         styles.dangerBtn,
-                        { borderColor: '#FF0000', backgroundColor: '#000000' },
+                        { borderColor: '#767676', backgroundColor: '#000000' },
                       ]}
                     >
-                      <Text style={[styles.dangerBtnText, { color: '#FF0000' }]}>
+                      <Text style={[styles.dangerBtnText, { color: '#767676' }]}>
                         Temizle
                       </Text>
                     </TouchableOpacity>
@@ -7011,7 +5902,7 @@ function GunlukPlanScreen() {
                       style={[
                         styles.ghostBtn,
                         {
-                          borderColor: '#950101',
+                          borderColor: '#484848',
                           backgroundColor: '#000000',
                         },
                       ]}
@@ -7025,7 +5916,7 @@ function GunlukPlanScreen() {
                       onPress={applyTaskDatePicker}
                       style={[
                         styles.primaryBtn,
-                        { backgroundColor: '#FF0000' },
+                        { backgroundColor: '#767676' },
                       ]}
                     >
                       <Text
@@ -7065,8 +5956,8 @@ function GunlukPlanScreen() {
                       style={[
                         styles.taskModalStarBtn,
                         {
-                          backgroundColor: taskStarred ? '#950101' : '#000000',
-                          borderColor: taskStarred ? '#FF0000' : '#950101',
+                          backgroundColor: taskStarred ? '#484848' : '#000000',
+                          borderColor: taskStarred ? '#767676' : '#484848',
                         },
                       ]}
                     >
@@ -7090,20 +5981,20 @@ function GunlukPlanScreen() {
                     onChangeText={setTaskTitle}
                     maxLength={100}
                     placeholder="Örn. Faturayı öde, Market alışverişi yap"
-                    placeholderTextColor="#e0a3a3"
+                    placeholderTextColor="#B5B5B5"
                     style={[
                       styles.textInput,
                       {
                         color: '#ffffff',
                         backgroundColor: '#000000',
-                        borderColor: '#950101',
+                        borderColor: '#484848',
                       },
                     ]}
                   />
 
                   <Text style={[styles.inputLabel, { color: '#ffffff' }]}>
                     Ayrıntılar / Not{' '}
-                    <Text style={{ fontWeight: '400', color: '#e0a3a3' }}>
+                    <Text style={{ fontWeight: '400', color: '#B5B5B5' }}>
                       (isteğe bağlı)
                     </Text>
                   </Text>
@@ -7112,20 +6003,20 @@ function GunlukPlanScreen() {
                     onChangeText={setTaskDetail}
                     maxLength={160}
                     placeholder="Ayrıntı ekle..."
-                    placeholderTextColor="#e0a3a3"
+                    placeholderTextColor="#B5B5B5"
                     style={[
                       styles.textInput,
                       {
                         color: '#ffffff',
                         backgroundColor: '#000000',
-                        borderColor: '#950101',
+                        borderColor: '#484848',
                       },
                     ]}
                   />
 
                   <Text style={[styles.inputLabel, { color: '#ffffff' }]}>
                     Tarih / Zaman{' '}
-                    <Text style={{ fontWeight: '400', color: '#e0a3a3' }}>
+                    <Text style={{ fontWeight: '400', color: '#B5B5B5' }}>
                       (isteğe bağlı)
                     </Text>
                   </Text>
@@ -7137,7 +6028,7 @@ function GunlukPlanScreen() {
                         styles.dateTimeSelectBtn,
                         {
                           backgroundColor: '#000000',
-                          borderColor: taskDueDate ? '#FF0000' : '#950101',
+                          borderColor: taskDueDate ? '#767676' : '#484848',
                         },
                       ]}
                     >
@@ -7146,7 +6037,7 @@ function GunlukPlanScreen() {
                         style={[
                           styles.dateTimeSelectBtnText,
                           {
-                            color: taskDueDate ? '#ffffff' : '#e0a3a3',
+                            color: taskDueDate ? '#ffffff' : '#B5B5B5',
                             fontWeight: taskDueDate ? '700' : '500',
                           },
                         ]}
@@ -7156,7 +6047,7 @@ function GunlukPlanScreen() {
                       <View
                         style={[
                           styles.dateTimeActionBadge,
-                          { backgroundColor: '#950101' },
+                          { backgroundColor: '#484848' },
                         ]}
                       >
                         <Text style={styles.dateTimeActionBadgeText}>
@@ -7189,7 +6080,7 @@ function GunlukPlanScreen() {
                     ]}
                   >
                     Alt görevler{' '}
-                    <Text style={{ fontWeight: '400', color: '#e0a3a3' }}>
+                    <Text style={{ fontWeight: '400', color: '#B5B5B5' }}>
                       ({taskSubtasks.length})
                     </Text>
                   </Text>
@@ -7203,7 +6094,7 @@ function GunlukPlanScreen() {
                             styles.subtaskItem,
                             {
                               backgroundColor: '#000000',
-                              borderColor: '#950101',
+                              borderColor: '#484848',
                             },
                           ]}
                         >
@@ -7213,9 +6104,9 @@ function GunlukPlanScreen() {
                               styles.subtaskCheck,
                               {
                                 borderRadius: 11,
-                                borderColor: st.done ? '#FF0000' : '#950101',
+                                borderColor: st.done ? '#767676' : '#484848',
                                 backgroundColor: st.done
-                                  ? '#FF0000'
+                                  ? '#767676'
                                   : 'transparent',
                               },
                             ]}
@@ -7229,7 +6120,7 @@ function GunlukPlanScreen() {
                             style={[
                               styles.subtaskTitle,
                               {
-                                color: st.done ? '#e0a3a3' : '#ffffff',
+                                color: st.done ? '#B5B5B5' : '#ffffff',
                                 textDecorationLine: st.done
                                   ? 'line-through'
                                   : 'none',
@@ -7242,7 +6133,7 @@ function GunlukPlanScreen() {
                             onPress={() => handleRemoveTaskSubtaskModal(st.id)}
                             style={styles.subtaskRemoveBtn}
                           >
-                            <Text style={{ color: '#e0a3a3', fontSize: 14 }}>
+                            <Text style={{ color: '#B5B5B5', fontSize: 14 }}>
                               ✕
                             </Text>
                           </TouchableOpacity>
@@ -7257,7 +6148,7 @@ function GunlukPlanScreen() {
                       onChangeText={setNewTaskSubtaskTitle}
                       maxLength={80}
                       placeholder="Alt görev ekle..."
-                      placeholderTextColor="#e0a3a3"
+                      placeholderTextColor="#B5B5B5"
                       onSubmitEditing={handleAddTaskSubtask}
                       style={[
                         styles.smallInput,
@@ -7266,7 +6157,7 @@ function GunlukPlanScreen() {
                           marginBottom: 0,
                           color: '#ffffff',
                           backgroundColor: '#000000',
-                          borderColor: '#950101',
+                          borderColor: '#484848',
                         },
                       ]}
                     />
@@ -7274,7 +6165,7 @@ function GunlukPlanScreen() {
                       onPress={handleAddTaskSubtask}
                       style={[
                         styles.subtaskAddBtn,
-                        { backgroundColor: '#FF0000' },
+                        { backgroundColor: '#767676' },
                       ]}
                     >
                       <Text
@@ -7295,9 +6186,9 @@ function GunlukPlanScreen() {
                         style={[
                           styles.dangerBtn,
                           {
-                            borderColor: '#FF0000',
+                            borderColor: '#767676',
                             backgroundColor: confirmTaskDelete
-                              ? '#FF0000'
+                              ? '#767676'
                               : '#000000',
                           },
                         ]}
@@ -7305,7 +6196,7 @@ function GunlukPlanScreen() {
                         <Text
                           style={[
                             styles.dangerBtnText,
-                            { color: confirmTaskDelete ? '#ffffff' : '#FF0000' },
+                            { color: confirmTaskDelete ? '#ffffff' : '#767676' },
                           ]}
                         >
                           {confirmTaskDelete ? 'Emin misin? Sil' : 'Sil'}
@@ -7320,7 +6211,7 @@ function GunlukPlanScreen() {
                       style={[
                         styles.ghostBtn,
                         {
-                          borderColor: '#950101',
+                          borderColor: '#484848',
                           backgroundColor: '#000000',
                         },
                       ]}
@@ -7334,7 +6225,7 @@ function GunlukPlanScreen() {
                       onPress={saveTaskModal}
                       style={[
                         styles.primaryBtn,
-                        { backgroundColor: '#FF0000' },
+                        { backgroundColor: '#767676' },
                       ]}
                     >
                       <Text
@@ -7374,6 +6265,917 @@ function GunlukPlanScreen() {
   );
 }
 
+
+interface HabitCardActions {
+  handleCardPress: (habit: Habit) => void;
+  handleCellPress: (habit: Habit, key: string) => void;
+  handleCellLongPress: (habit: Habit, key: string) => void;
+  openEditor: (habit: Habit | null) => void;
+  moveHabit: (id: string, direction: -1 | 1) => void;
+  setListGestureActive: (active: boolean) => void;
+}
+
+interface HabitCardProps {
+  h: Habit;
+  i: number;
+  dragControls: SpringDragItemControls;
+  habitCount: number;
+  habitMarks?: Record<string, MarkType>;
+  habitProgress?: Record<string, number>;
+  reorderMode: boolean;
+  monthlyViewMode: boolean;
+  today: {key: string; d: number};
+  viewMonth: {y: number; m: number};
+  theme: TabTheme;
+  windowWidth: number;
+  dim: number;
+  daysArray: number[];
+  cardInnerWidth: number;
+  cellSize: number;
+  cellGap: number;
+  rowViewportWidth: number;
+  cellStep: number;
+  initialScrollX: number;
+  scrollKey: string;
+  ignoreHabitSwipeRef: React.MutableRefObject<boolean>;
+  actions: HabitCardActions;
+}
+
+// Only the changed habit rerenders; opening/typing in a sheet leaves the list intact.
+const HabitCard = React.memo(function HabitCard({h, i, dragControls, habitCount, habitMarks, habitProgress, reorderMode, monthlyViewMode, today, viewMonth, theme, windowWidth, dim, daysArray, cardInnerWidth, cellSize, cellGap, rowViewportWidth, cellStep, initialScrollX, scrollKey, ignoreHabitSwipeRef, actions}: HabitCardProps) {
+  const {handleCardPress, handleCellPress, handleCellLongPress, openEditor, moveHabit, setListGestureActive} = actions;
+  const getMark = (_id: string, key: string) => habitMarks?.[key] || '';
+  const getProgress = (_id: string, key: string) => habitProgress?.[key] || 0;
+
+  const { cur, best } = reorderMode
+    ? { cur: 0, best: 0 }
+    : calculateStreaks(habitMarks, today.key);
+  let monthDone = 0;
+  if (!reorderMode) {
+    for (let d = 1; d <= dim; d++) {
+      if (getMark(h.id, dateKey(viewMonth.y, viewMonth.m, d)) === 'g') {
+        monthDone++;
+      }
+    }
+  }
+  const todayMark = getMark(h.id, today.key);
+  const todayMarkObj = todayMark ? MARKS[todayMark] : null;
+  const todayProg = getProgress(h.id, today.key);
+  const hasActiveGoal =
+    !!h.goal && h.goal.type !== 'none' && h.goal.target > 0;
+
+  let goalBadgeText = '';
+  let goalIconName: MicroIconName = 'timer';
+  if (hasActiveGoal && h.goal) {
+    if (h.goal.type === 'timer') {
+      goalIconName = 'timer';
+      goalBadgeText =
+        todayProg > 0 && todayProg < h.goal.target
+          ? `${formatDuration(todayProg)} / ${formatTimerReadable(h.goal.target)}`
+          : `${formatTimerReadable(h.goal.target)}`;
+    } else if (h.goal.type === 'reps') {
+      goalIconName = 'repeat';
+      goalBadgeText = `${todayProg}/${h.goal.target} tekrar`;
+    } else if (h.goal.type === 'amount') {
+      goalIconName = 'chart';
+      goalBadgeText = `${todayProg}/${h.goal.target}${h.goal.unit ? ' ' + h.goal.unit : ''}`;
+    }
+  }
+
+  return (
+    <FadeSlideIn index={i}>
+    <SwipeableTaskRow
+      disabled={reorderMode}
+      enableRightSwipe={false}
+      leftActionMode="bounce"
+      leftLabel="Düzenle"
+      leftIcon="✎"
+      leftColor={theme.accent}
+      borderRadius={theme.radius}
+      ignoreSwipeRef={ignoreHabitSwipeRef}
+      onSwipeActiveChange={setListGestureActive}
+      onThresholdHaptic={() => {
+        Haptics.impactAsync(
+          Haptics.ImpactFeedbackStyle.Light
+        ).catch(() => {});
+      }}
+      onSwipeLeft={() => {
+        Haptics.impactAsync(
+          Haptics.ImpactFeedbackStyle.Medium
+        ).catch(() => {});
+        openEditor(h);
+      }}
+    >
+    <View
+      style={[
+        styles.card,
+        reorderMode && styles.compactCard,
+        {
+          backgroundColor: theme.surface,
+          borderRadius: theme.radius,
+          borderColor: theme.cardBorderColor,
+          borderWidth: theme.cardBorderWidth,
+          shadowColor: theme.isDark ? '#000000' : theme.accent,
+        },
+      ]}
+    >
+      <CardSheen color={theme.accent} />
+      {reorderMode && (
+        <>
+          <View
+            {...dragControls.handleProps}
+            style={[
+              styles.dragHandleBadge,
+              {
+                backgroundColor: theme.isDark
+                  ? 'rgba(255,255,255,0.06)'
+                  : 'rgba(0,0,0,0.04)',
+              },
+            ]}
+          >
+            <Text style={{ color: theme.muted, fontSize: 16 }}>
+              ⠿
+            </Text>
+          </View>
+          <View
+            {...dragControls.handleProps}
+            style={styles.compactInfo}
+          >
+            <Text
+              style={[
+                styles.cardTitle,
+                {
+                  color: theme.text,
+                  fontStyle: theme.headItalic ? 'italic' : 'normal',
+                },
+              ]}
+            >
+              {h.name}
+            </Text>
+            {!!h.detail && (
+              <Text
+                numberOfLines={1}
+                style={[styles.cardDetail, { color: theme.muted }]}
+              >
+                {h.detail}
+              </Text>
+            )}
+          </View>
+          <TouchableOpacity
+            disabled={i === 0}
+            onPress={() => moveHabit(h.id, -1)}
+            style={[
+              styles.iconBtn,
+              {
+                backgroundColor: theme.isDark
+                  ? 'rgba(255,255,255,0.05)'
+                  : 'rgba(0,0,0,0.04)',
+                borderColor: 'transparent',
+                opacity: i === 0 ? 0.3 : 1,
+              },
+            ]}
+          >
+            <Text style={{ color: theme.text, fontSize: 12 }}>▲</Text>
+          </TouchableOpacity>
+          <TouchableOpacity
+            disabled={i === habitCount - 1}
+            onPress={() => moveHabit(h.id, 1)}
+            style={[
+              styles.iconBtn,
+              {
+                backgroundColor: theme.isDark
+                  ? 'rgba(255,255,255,0.05)'
+                  : 'rgba(0,0,0,0.04)',
+                borderColor: 'transparent',
+                opacity: i === habitCount - 1 ? 0.3 : 1,
+              },
+            ]}
+          >
+            <Text style={{ color: theme.text, fontSize: 12 }}>▼</Text>
+          </TouchableOpacity>
+        </>
+      )}
+
+      <View style={reorderMode ? { display: 'none' } : undefined}>
+      {/* Kart Üst Kısmı (Gelişmiş Tipografi + Mikro-İkonlu İstatistikler + Bugün Aktivite Çemberi) */}
+      <View style={styles.cardHead}>
+        {habitCount > 1 && (
+          <View
+            {...dragControls.handleProps}
+            accessibilityLabel="Sürükleyerek sırala"
+            style={{
+              paddingRight: 0,
+              paddingVertical: 6,
+              justifyContent: 'center',
+            }}
+          >
+            <Text
+              style={{
+                color: theme.accent,
+                fontSize: 17,
+                opacity: 1,
+              }}
+            >
+              ⠿
+            </Text>
+          </View>
+        )}
+        <HabitEmblem name={h.name} tab={h.tab} emoji={h.emoji} size={windowWidth < 380 ? 34 : 44} />
+        <View
+          {...dragControls.longPressDragProps}
+          style={styles.cardInfo}
+        >
+        <Pressable
+          onPress={() => handleCardPress(h)}
+        >
+          <View style={styles.cardTitleGroup}>
+            <Text
+              style={[
+                styles.cardTitle,
+                {
+                  color: theme.text,
+                  fontStyle: theme.headItalic ? 'italic' : 'normal',
+                },
+              ]}
+            >
+              {h.name}
+            </Text>
+            {!!h.detail && (
+              <Text
+                style={[styles.cardDetail, { color: theme.muted }]}
+              >
+                {h.detail}
+              </Text>
+            )}
+          </View>
+
+          <View style={styles.cardStats}>
+            <View
+              style={[
+                styles.statMicroPill,
+                { borderColor: withAlpha(theme.accent, 0.2) },
+                {
+                  backgroundColor: theme.isDark
+                    ? 'rgba(255,255,255,0.05)'
+                    : withAlpha(theme.accent, 0.08),
+                },
+              ]}
+            >
+              <StreakIcon streak={cur} color={theme.accent} />
+              <Text style={[styles.statText, { color: theme.muted }]}>
+                <Text style={[styles.statBold, { color: theme.text }]}>
+                  {cur}
+                </Text>{' '}
+                gün
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.statMicroPill,
+                { borderColor: withAlpha(theme.accent, 0.2) },
+                {
+                  backgroundColor: theme.isDark
+                    ? 'rgba(255,255,255,0.05)'
+                    : 'rgba(0,0,0,0.035)',
+                },
+              ]}
+            >
+              <MicroIcon
+                name="trophy"
+                size={12}
+                color={theme.accent}
+              />
+              <Text style={[styles.statText, { color: theme.muted }]}>
+                Rekor{' '}
+                <Text style={[styles.statBold, { color: theme.text }]}>
+                  {best}
+                </Text>
+              </Text>
+            </View>
+
+            <View
+              style={[
+                styles.statMicroPill,
+                { borderColor: withAlpha(theme.accent, 0.2) },
+                {
+                  backgroundColor: theme.isDark
+                    ? 'rgba(255,255,255,0.05)'
+                    : 'rgba(0,0,0,0.035)',
+                },
+              ]}
+            >
+              <MicroIcon
+                name="calendar"
+                size={12}
+                color={theme.accent}
+              />
+              <Text style={[styles.statText, { color: theme.muted }]}>
+                <Text style={[styles.statBold, { color: theme.text }]}>
+                  {monthDone}
+                </Text>
+                /{dim}
+              </Text>
+            </View>
+
+            {!!goalBadgeText && (
+              <View
+                style={[
+                  styles.goalChip,
+                  {
+                    backgroundColor: withAlpha(theme.accent, 0.12),
+                    borderColor: withAlpha(theme.accent, 0.3),
+                  },
+                ]}
+              >
+                <MicroIcon
+                  name={goalIconName}
+                  size={11}
+                  color={theme.accent}
+                />
+                <Text
+                  style={[
+                    styles.goalChipText,
+                    { color: theme.text },
+                  ]}
+                >
+                  {goalBadgeText}
+                </Text>
+              </View>
+            )}
+          </View>
+        </Pressable>
+        </View>
+
+        {/* Bugün Aktivite Çemberi & Minimal Etiketi */}
+        <View style={styles.cardActions}>
+          <View style={styles.todayBtnWrap}>
+            <View
+              pointerEvents="none"
+              style={[
+                styles.todayBadge,
+                {
+                  backgroundColor: todayMarkObj
+                    ? todayMarkObj.color
+                    : withAlpha(theme.accent, 0.14),
+                },
+              ]}
+            >
+              <Text
+                allowFontScaling={false}
+                style={[
+                  styles.todayBadgeText,
+                  {
+                    color: todayMarkObj ? '#ffffff' : theme.accent,
+                  },
+                ]}
+              >
+                BUGÜN
+              </Text>
+            </View>
+            <MarkPop
+              mark={todayMark}
+              color={todayMarkObj?.color}
+              radiusStyle={{ borderRadius: 999 }}
+              burst
+              burstColors={[
+                MARK_COLORS.green,
+                theme.accent,
+                '#facc15',
+                '#ffffff',
+              ]}
+            >
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={`${h.name}, bugün: ${todayMarkObj?.subLabel || 'İşaretsiz'}`}
+              onPress={() => handleCellPress(h, today.key)}
+              onLongPress={() => handleCellLongPress(h, today.key)}
+              delayLongPress={380}
+              style={({ pressed }) => {
+                const isPartialLiquid =
+                  hasActiveGoal &&
+                  !!h.goal &&
+                  (h.goal.type === 'amount' ||
+                    h.goal.type === 'reps') &&
+                  todayProg > 0 &&
+                  todayProg < h.goal.target &&
+                  todayMark === 'b';
+                return [
+                  styles.todayBtn,
+                  {
+                    backgroundColor: isPartialLiquid
+                      ? theme.isDark
+                        ? 'rgba(14,165,233,0.12)'
+                        : 'rgba(14,165,233,0.08)'
+                      : todayMarkObj
+                      ? withAlpha(todayMarkObj.color, 0.1)
+                      : theme.isDark
+                      ? 'rgba(255,255,255,0.06)'
+                      : withAlpha(theme.accent, 0.08),
+                    borderColor: isPartialLiquid
+                      ? '#38bdf8'
+                      : todayMarkObj
+                      ? todayMarkObj.color
+                      : theme.accent,
+                    shadowColor: todayMarkObj
+                      ? todayMarkObj.color
+                      : theme.accent,
+                    shadowOpacity: 0.65,
+                    shadowRadius: 10,
+                    shadowOffset: { width: 0, height: 4 },
+                    elevation: todayMarkObj ? 4 : 1,
+                    transform: [{ scale: pressed ? 0.91 : 1 }],
+                  },
+                ];
+              }}
+            >
+              {hasActiveGoal &&
+                !!h.goal &&
+                (h.goal.type === 'amount' ||
+                  h.goal.type === 'reps') &&
+                todayProg > 0 &&
+                todayProg < h.goal.target &&
+                todayMark === 'b' && (
+                  <View
+                    pointerEvents="none"
+                    style={{
+                      position: 'absolute',
+                      top: 0,
+                      left: 0,
+                      right: 0,
+                      bottom: 0,
+                      borderRadius: 999,
+                      overflow: 'hidden',
+                    }}
+                  >
+                    <View
+                      style={{
+                        position: 'absolute',
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        height: `${Math.min(
+                          95,
+                          Math.max(
+                            12,
+                            Math.round(
+                              (todayProg / h.goal.target) * 100
+                            )
+                          )
+                        )}%`,
+                        backgroundColor: '#0ea5e9',
+                        borderTopWidth: 2,
+                        borderTopColor: '#bae6fd',
+                      }}
+                    />
+                  </View>
+                )}
+              <Text
+                style={[
+                  styles.todayBtnNum,
+                  {
+                    color: todayMarkObj ? '#ffffff' : theme.accent,
+                  },
+                ]}
+              >
+                {today.d}
+              </Text>
+              {todayMarkObj && (
+                <View
+                  style={[
+                    styles.cellStatusBadge,
+                    {
+                      backgroundColor: '#ffffff',
+                    },
+                  ]}
+                >
+                  <Text
+                    style={[
+                      styles.cellStatusSymbol,
+                      { color: todayMarkObj.color },
+                    ]}
+                  >
+                    {todayMarkObj.symbol}
+                  </Text>
+                </View>
+              )}
+            </Pressable>
+            </MarkPop>
+          </View>
+        </View>
+      </View>
+
+      {/* Aktivite Çemberleri: Aylık Takvim Görünümü (3 Satır Kompakt) veya 7 Günlük Haftalık Görünüm */}
+      {monthlyViewMode ? (
+        (() => {
+          const monthCols = 11;
+          const mCellSize = Math.min(
+            22,
+            Math.max(
+              18,
+              Math.floor((cardInnerWidth - 50) / monthCols)
+            )
+          );
+          const mCellGap = Math.max(
+            4,
+            Math.floor(
+              (cardInnerWidth - mCellSize * monthCols) /
+                (monthCols - 1)
+            )
+          );
+          const mLinkH = 11;
+
+          return (
+            <View
+              style={{
+                marginTop: 6,
+                marginBottom: -4,
+                gap: 4,
+                alignSelf: 'center',
+                width: cardInnerWidth,
+              }}
+            >
+              {[0, 1, 2].map((rowIdx) => {
+                const rowDays = daysArray.slice(
+                  rowIdx * monthCols,
+                  (rowIdx + 1) * monthCols
+                );
+                if (rowDays.length === 0) return null;
+
+                return (
+                  <View
+                    key={`m-row-${rowIdx}`}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      gap: mCellGap,
+                      position: 'relative',
+                      height: mCellSize,
+                    }}
+                  >
+                    {rowDays.map((d) => {
+                      const k = dateKey(
+                        viewMonth.y,
+                        viewMonth.m,
+                        d
+                      );
+                      const mark = getMark(h.id, k);
+                      const markObj = mark ? MARKS[mark] : null;
+                      const isFuture = k > today.key;
+                      const isToday = k === today.key;
+                      const prevMark =
+                        d > 1
+                          ? getMark(
+                              h.id,
+                              dateKey(
+                                viewMonth.y,
+                                viewMonth.m,
+                                d - 1
+                              )
+                            )
+                          : null;
+                      const nextMark =
+                        d < dim
+                          ? getMark(
+                              h.id,
+                              dateKey(
+                                viewMonth.y,
+                                viewMonth.m,
+                                d + 1
+                              )
+                            )
+                          : null;
+                      const inGreenChain =
+                        mark === 'g' &&
+                        (prevMark === 'g' || nextMark === 'g');
+
+                      return (
+                        <View
+                          key={k}
+                          style={{
+                            width: mCellSize,
+                            height: mCellSize,
+                            position: 'relative',
+                          }}
+                        >
+                          <Pressable
+                            accessibilityRole="button"
+                            accessibilityLabel={`${h.name}, ${d} ${TR_MONTHS[viewMonth.m]}: ${markObj?.subLabel || 'İşaretsiz'}`}
+                            disabled={isFuture}
+                            onPress={() => handleCellPress(h, k)}
+                            onLongPress={() =>
+                              handleCellLongPress(h, k)
+                            }
+                            delayLongPress={380}
+                            style={[
+                              styles.chainCell,
+                              {
+                                width: mCellSize,
+                                height: mCellSize,
+                                borderRadius: mCellSize / 2,
+                                backgroundColor: markObj
+                                  ? withAlpha(markObj.color, 0.1)
+                                  : isToday
+                                  ? withAlpha(theme.accent, 0.14)
+                                  : theme.isDark
+                                  ? 'rgba(255,255,255,0.055)'
+                                  : 'rgba(0,0,0,0.04)',
+                                borderColor: markObj
+                                  ? markObj.color
+                                  : isToday
+                                  ? theme.accent
+                                  : theme.isDark
+                                  ? 'rgba(255,255,255,0.07)'
+                                  : 'rgba(0,0,0,0.04)',
+                                borderWidth: inGreenChain
+                                  ? 1.4
+                                  : isToday && !markObj
+                                  ? 1.6
+                                  : 1,
+                                opacity: isFuture ? 0.3 : 1,
+                              },
+                            ]}
+                          >
+                            <Text
+                              allowFontScaling={false}
+                              style={{
+                                fontSize: 9.5,
+                                fontVariant: ['tabular-nums'],
+                                color: markObj
+                                  ? '#ffffff'
+                                  : isToday
+                                  ? theme.accent
+                                  : theme.muted,
+                                fontWeight:
+                                  markObj || isToday
+                                    ? '800'
+                                    : '600',
+                              }}
+                            >
+                              {d}
+                            </Text>
+                            {markObj && (
+                              <View
+                                style={{
+                                  position: 'absolute',
+                                  right: -1.5,
+                                  bottom: -1.5,
+                                  width: 8.5,
+                                  height: 8.5,
+                                  borderRadius: 4.25,
+                                  backgroundColor: '#ffffff',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                }}
+                              >
+                                <Text
+                                  allowFontScaling={false}
+                                  style={{
+                                    fontSize: 6,
+                                    fontWeight: '900',
+                                    color: markObj.color,
+                                    lineHeight: 7,
+                                  }}
+                                >
+                                  {markObj.symbol}
+                                </Text>
+                              </View>
+                            )}
+                          </Pressable>
+                        </View>
+                      );
+                    })}
+
+                    {/* Satır İçi 3B Metalik Zincir & Lazer Dalgası Köprüleri */}
+                    {rowDays.map((d, colIdx) => {
+                      if (
+                        colIdx >= rowDays.length - 1 ||
+                        d >= dim
+                      ) {
+                        return null;
+                      }
+                      const k = dateKey(
+                        viewMonth.y,
+                        viewMonth.m,
+                        d
+                      );
+                      const mark = getMark(h.id, k);
+                      const nextMark = getMark(
+                        h.id,
+                        dateKey(viewMonth.y, viewMonth.m, d + 1)
+                      );
+                      const linkActive =
+                        mark === 'g' && nextMark === 'g';
+                      const linkColor =
+                        mark === 'g' && nextMark === 'g'
+                          ? MARK_COLORS.green
+                          : mark === 'b' && nextMark === 'b'
+                          ? MARK_COLORS.blue
+                          : MARK_COLORS.green;
+
+                      return (
+                        <ChainLink
+                          key={`m-link-${k}`}
+                          active={linkActive}
+                          color={linkColor}
+                          trackColor={
+                            theme.isDark
+                              ? 'rgba(255,255,255,0.08)'
+                              : 'rgba(0,0,0,0.06)'
+                          }
+                          width={mCellGap}
+                          height={mLinkH}
+                          delay={14}
+                          stepIndex={d}
+                          style={{
+                            position: 'absolute',
+                            left:
+                              (colIdx + 1) * mCellSize +
+                              colIdx * mCellGap,
+                            top: (mCellSize - mLinkH) / 2,
+                            elevation: 6,
+                          }}
+                        />
+                      );
+                    })}
+                  </View>
+                );
+              })}
+            </View>
+          );
+        })()
+      ) : (
+      <HabitWeekScroll
+        dayCount={dim}
+        cellSize={cellSize}
+        initialScrollX={initialScrollX}
+        rowViewportWidth={rowViewportWidth}
+        cellStep={cellStep}
+        scrollKey={scrollKey}
+        onTouchChange={(t) => {
+          ignoreHabitSwipeRef.current = t;
+        }}
+      >
+        {(first, last) => <>
+        {daysArray.slice(first, last).map((d) => {
+          const k = dateKey(viewMonth.y, viewMonth.m, d);
+          const mark = getMark(h.id, k);
+          const markObj = mark ? MARKS[mark] : null;
+          const isFuture = k > today.key;
+          const isToday = k === today.key;
+          const prevMark =
+            d > 1
+              ? getMark(
+                  h.id,
+                  dateKey(viewMonth.y, viewMonth.m, d - 1)
+                )
+              : null;
+          const nextMark =
+            d < dim
+              ? getMark(
+                  h.id,
+                  dateKey(viewMonth.y, viewMonth.m, d + 1)
+                )
+              : null;
+          const inGreenChain =
+            mark === 'g' && (prevMark === 'g' || nextMark === 'g');
+
+          return (
+            <View
+              key={k}
+              style={{
+                width: cellSize,
+                height: cellSize,
+                position: 'absolute',
+                left: 10 + (d - 1) * cellStep,
+                top: 12,
+              }}
+            >
+              <Pressable
+                accessibilityRole="button"
+                accessibilityLabel={`${h.name}, ${d} ${TR_MONTHS[viewMonth.m]}: ${markObj?.subLabel || 'İşaretsiz'}`}
+                disabled={isFuture}
+                onPress={() => handleCellPress(h, k)}
+                onLongPress={() => handleCellLongPress(h, k)}
+                delayLongPress={380}
+                style={[
+                  styles.chainCell,
+                  {
+                    width: cellSize,
+                    height: cellSize,
+                    borderRadius: cellSize / 2,
+                    backgroundColor: markObj
+                      ? withAlpha(markObj.color, 0.1)
+                      : isToday
+                      ? withAlpha(theme.accent, 0.12)
+                      : theme.isDark
+                      ? 'rgba(255,255,255,0.055)'
+                      : 'rgba(0,0,0,0.04)',
+                    borderColor: markObj
+                      ? markObj.color
+                      : isToday
+                      ? theme.accent
+                      : theme.isDark
+                      ? 'rgba(255,255,255,0.07)'
+                      : 'rgba(0,0,0,0.04)',
+                    borderWidth: markObj || isToday ? 1.5 : 1,
+                    shadowColor: markObj ? markObj.color : isToday ? theme.accent : 'transparent',
+                    shadowOffset: { width: 0, height: 1 },
+                    shadowOpacity: markObj || isToday ? 0.65 : 0,
+                    shadowRadius: markObj || isToday ? 8 : 0,
+                    elevation: markObj ? 1 : 0,
+                    opacity: isFuture ? 0.3 : 1,
+                  },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.chainCellText,
+                    {
+                      color: markObj
+                        ? '#ffffff'
+                        : isToday
+                        ? theme.accent
+                        : theme.muted,
+                      fontWeight:
+                        markObj || isToday ? '800' : '600',
+                    },
+                  ]}
+                >
+                  {d}
+                </Text>
+                {markObj && (
+                  <View
+                    style={[
+                      styles.cellStatusBadge,
+                      { backgroundColor: '#ffffff' },
+                    ]}
+                  >
+                    <Text
+                      style={[
+                        styles.cellStatusSymbol,
+                        { color: markObj.color },
+                      ]}
+                    >
+                      {markObj.symbol}
+                    </Text>
+                  </View>
+                )}
+              </Pressable>
+            </View>
+          );
+        })}
+
+        {/* 3B Metalik Zincir & Lazer Dalgası Köprü Katmanı (Hücrelerin üstünde, dokunmayı engellemez) */}
+        {daysArray.slice(Math.max(0, first - 1), last).map((d) => {
+          if (d >= dim) return null;
+          const k = dateKey(viewMonth.y, viewMonth.m, d);
+          const mark = getMark(h.id, k);
+          const nextMark = getMark(
+            h.id,
+            dateKey(viewMonth.y, viewMonth.m, d + 1)
+          );
+          const linkActive = mark === 'g' && nextMark === 'g';
+          const linkColor =
+            mark === 'g' && nextMark === 'g'
+              ? MARK_COLORS.green
+              : mark === 'b' && nextMark === 'b'
+              ? MARK_COLORS.blue
+              : MARK_COLORS.green;
+
+          return (
+            <ChainLink
+              key={`link-${k}`}
+              active={linkActive}
+              color={linkColor}
+              trackColor={
+                theme.isDark
+                  ? 'rgba(255,255,255,0.08)'
+                  : 'rgba(0,0,0,0.06)'
+              }
+              width={cellGap}
+              height={18}
+              delay={18}
+              stepIndex={d}
+              style={{
+                position: 'absolute',
+                left: 10 + d * cellSize + (d - 1) * cellGap,
+                top: 12 + (cellSize - 18) / 2,
+                elevation: 6,
+              }}
+            />
+          );
+        })}
+        </>}
+      </HabitWeekScroll>
+      )}
+      </View>
+    </View>
+    </SwipeableTaskRow>
+    </FadeSlideIn>
+  );
+});
+
 const styles = StyleSheet.create({
   loadingContainer: {
     flex: 1,
@@ -7384,13 +7186,9 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   topbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-    zIndex: 20,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between',
+    paddingVertical: 12, paddingHorizontal: 16, borderBottomWidth: 0, zIndex: 20,
+    width: '100%', maxWidth: 760, alignSelf: 'center',
   },
   topbarLeft: {
     flexDirection: 'row',
@@ -7428,18 +7226,12 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   topModeTabBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingVertical: 6,
-    paddingHorizontal: 14,
-    borderRadius: 999,
+    flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 10,
+    paddingHorizontal: 23, borderRadius: 999, borderWidth: 1, borderColor: 'transparent',
   },
   topModeTabBtnActive: {
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    elevation: 2,
+    borderWidth: 1, shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.65, shadowRadius: 12, elevation: 4,
   },
   topModeTabText: {
     fontSize: 13.5,
@@ -7631,17 +7423,9 @@ const styles = StyleSheet.create({
     borderWidth: 1.5,
   },
   profileCircleBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    borderWidth: 1.2,
-    alignItems: 'center',
-    justifyContent: 'center',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.06,
-    shadowRadius: 6,
-    elevation: 2,
+    width: 40, height: 40, borderRadius: 20, borderWidth: 1.5, alignItems: 'center',
+    justifyContent: 'center', shadowColor: '#000000', shadowOffset: { width: 0, height: 0 },
+    shadowOpacity: 0.6, shadowRadius: 10, elevation: 3,
   },
   profileCircleInitials: {
     fontSize: 12.5,
@@ -7813,30 +7597,21 @@ const styles = StyleSheet.create({
     elevation: 6,
     zIndex: 30,
   },
-  bottomTabBar: {
-    borderTopWidth: 1,
-    paddingTop: 8,
-    paddingHorizontal: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: -6 },
-    shadowOpacity: 0.06,
-    shadowRadius: 16,
-    elevation: 10,
+  categoryBar: {
+    marginHorizontal: 16, padding: 4, borderWidth: 1, borderColor: 'transparent',
+    borderRadius: 24, maxHeight: 92, flexShrink: 0,
+    maxWidth: 728, alignSelf: 'center', alignItems: 'stretch',
   },
   tabsScroll: {
-    flexDirection: 'row',
-    gap: 8,
+    flexDirection: 'row', gap: 4,
+  },
+  addTabButton: {
+    width: 64, borderWidth: 1, borderStyle: 'dashed', borderRadius: 20,
+    alignItems: 'center', justifyContent: 'center', gap: 3, marginHorizontal: 2,
   },
   tabBtn: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingVertical: 7,
-    paddingHorizontal: 13,
-    borderRadius: 16,
-    borderWidth: 1,
-    borderColor: 'transparent',
-    minWidth: 82,
-    gap: 2,
+    alignItems: 'center', justifyContent: 'center', paddingVertical: 7, paddingHorizontal: 5,
+    borderRadius: 20, borderWidth: 1, borderColor: 'transparent', gap: 4,
   },
   tabEmojiWrap: {
     position: 'relative',
@@ -7870,14 +7645,10 @@ const styles = StyleSheet.create({
     marginBottom: 1,
   },
   tabName: {
-    fontSize: 11.5,
-    letterSpacing: -0.1,
+    fontSize: 11, lineHeight: 14, flexShrink: 0, letterSpacing: -0.2, maxWidth: '100%',
   },
   tabCountPill: {
-    marginTop: 2,
-    paddingHorizontal: 7,
-    paddingVertical: 1.5,
-    borderRadius: 999,
+    paddingHorizontal: 11, paddingVertical: 2, borderRadius: 999,
   },
   tabCount: {
     fontSize: 10.5,
@@ -7888,9 +7659,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   mainContent: {
-    paddingHorizontal: 16,
-    paddingTop: 12,
-    paddingBottom: 64,
+    paddingHorizontal: 16, paddingTop: 0, paddingBottom: 36, width: '100%', maxWidth: 760, alignSelf: 'center',
   },
   hero: {
     paddingVertical: 11,
@@ -7960,12 +7729,12 @@ const styles = StyleSheet.create({
     zIndex: 10,
   },
   toolbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flexWrap: 'wrap',
-    gap: 8,
-    marginTop: 16,
-    marginBottom: 14,
+    flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 12, marginBottom: 13,
+  },
+  neonAddBtn: {
+    width: 35, height: 35, borderRadius: 18, borderWidth: 1.5, alignItems: 'center',
+    padding: 0, flexShrink: 0,
+    justifyContent: 'center', shadowOpacity: 0.6, shadowRadius: 9, shadowOffset: { width: 0, height: 0 },
   },
   monthNav: {
     flexDirection: 'row',
@@ -7973,31 +7742,14 @@ const styles = StyleSheet.create({
     gap: 4,
   },
   monthNavPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 4,
-    paddingHorizontal: 6,
-    borderRadius: 999,
-    borderWidth: 1,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 3 },
-    shadowOpacity: 0.04,
-    shadowRadius: 8,
-    elevation: 1,
+    flexDirection: 'row', alignItems: 'center', paddingVertical: 4, paddingHorizontal: 2,
+    borderRadius: 999, borderWidth: 1,
   },
   monthTitle: {
-    minWidth: 116,
-    textAlign: 'center',
-    fontSize: 14,
-    fontWeight: '700',
-    letterSpacing: -0.2,
+    minWidth: 80, textAlign: 'center', fontSize: 13, fontWeight: '700', letterSpacing: -0.2,
   },
   iconBtnMinimal: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
+    width: 20, height: 24, alignItems: 'center', justifyContent: 'center',
   },
   iconBtn: {
     width: 34,
@@ -8013,10 +7765,7 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   toolbarRight: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginLeft: 'auto',
+    flexDirection: 'row', alignItems: 'center', gap: 6, marginLeft: 'auto',
   },
   btnContentRow: {
     flexDirection: 'row',
@@ -8038,14 +7787,10 @@ const styles = StyleSheet.create({
     letterSpacing: -0.1,
   },
   pillBtn: {
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 13,
-    borderWidth: 1,
+    borderRadius: 999, paddingVertical: 9, paddingHorizontal: 10, borderWidth: 1,
   },
   pillBtnText: {
-    fontSize: 12.5,
-    fontWeight: '600',
+    fontSize: 10.5, fontWeight: '600',
   },
   ghostBtn: {
     borderRadius: 999,
@@ -8088,12 +7833,8 @@ const styles = StyleSheet.create({
     gap: 14,
   },
   card: {
-    paddingVertical: 16,
-    paddingHorizontal: 18,
-    shadowOffset: { width: 0, height: 10 },
-    shadowOpacity: 0.075,
-    shadowRadius: 20,
-    elevation: 3,
+    paddingVertical: 14, paddingHorizontal: 14, shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.2, shadowRadius: 14, elevation: 3,
   },
   compactCard: {
     flexDirection: 'row',
@@ -8113,14 +7854,10 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   cardHead: {
-    flexDirection: 'row',
-    alignItems: 'flex-start',
-    justifyContent: 'space-between',
-    gap: 12,
+    flexDirection: 'row', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8,
   },
   cardInfo: {
-    flex: 1,
-    gap: 10,
+    flex: 1, minWidth: 0, gap: 8,
   },
   cardTitleGroup: {
     flexDirection: 'column',
@@ -8128,35 +7865,20 @@ const styles = StyleSheet.create({
     gap: 3,
   },
   cardTitle: {
-    fontSize: 17,
-    fontWeight: '700',
-    letterSpacing: -0.3,
-    lineHeight: 22,
+    fontSize: 16, fontWeight: '700', letterSpacing: -0.3, lineHeight: 22,
   },
   cardDetail: {
-    fontSize: 13,
-    fontWeight: '500',
-    lineHeight: 18,
-    opacity: 0.88,
+    fontSize: 11.5, fontWeight: '400', lineHeight: 17,
   },
   cardStats: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    alignItems: 'center',
-    gap: 6,
+    flexDirection: 'row', flexWrap: 'wrap', alignItems: 'center', gap: 5, marginTop: 7,
   },
   statMicroPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4.5,
-    paddingHorizontal: 8.5,
-    paddingVertical: 4,
-    borderRadius: 999,
+    flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 7,
+    paddingVertical: 4, borderRadius: 999, borderWidth: 0.5, borderColor: 'rgba(255,255,255,0.12)',
   },
   statText: {
-    fontSize: 11.5,
-    fontWeight: '500',
-    fontVariant: ['tabular-nums'],
+    fontSize: 10, fontWeight: '500', fontVariant: ['tabular-nums'],
   },
   statWithIcon: {
     flexDirection: 'row',
@@ -8182,19 +7904,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   todayBtnWrap: {
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 5,
-    minWidth: 52,
+    alignItems: 'center', justifyContent: 'center', gap: 5, minWidth: 44,
   },
   todayBtn: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    borderWidth: 1.8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    position: 'relative',
+    width: 42, height: 42, borderRadius: 21, borderWidth: 1.5, alignItems: 'center',
+    justifyContent: 'center', position: 'relative',
   },
   todayBadge: {
     paddingHorizontal: 7,
@@ -8204,10 +7918,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   todayBadgeText: {
-    fontSize: 8.5,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-    textAlign: 'center',
+    fontSize: 8, fontWeight: '700', letterSpacing: 0.5, textAlign: 'center',
   },
   todayBtnNum: {
     fontSize: 14,
@@ -8215,9 +7926,7 @@ const styles = StyleSheet.create({
     fontVariant: ['tabular-nums'],
   },
   chainScroll: {
-    marginTop: 8,
-    marginBottom: -6,
-    alignSelf: 'center',
+    marginTop: 12, marginBottom: -2, alignSelf: 'center',
   },
   chainRow: {
     flexDirection: 'row',
@@ -8231,8 +7940,7 @@ const styles = StyleSheet.create({
     position: 'relative',
   },
   chainCellText: {
-    fontSize: 12.5,
-    fontVariant: ['tabular-nums'],
+    fontSize: 13, fontVariant: ['tabular-nums'],
   },
   cellStatusBadge: {
     position: 'absolute',
@@ -8303,16 +8011,16 @@ const styles = StyleSheet.create({
   },
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(8, 10, 15, 0.52)',
-    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    justifyContent: 'flex-end',
     alignItems: 'center',
   },
   modalBackdropInner: {
     width: '100%',
     flex: 1,
-    justifyContent: 'center',
+    justifyContent: 'flex-end',
     alignItems: 'center',
-    padding: 18,
+    padding: 0,
   },
   menuSheet: {
     width: 268,
@@ -8412,13 +8120,36 @@ const styles = StyleSheet.create({
     gap: 8,
     marginBottom: 14,
   },
+  habitIdentityRow: {
+    flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 14,
+  },
+  habitNameInput: {
+    flex: 1, width: 'auto', minWidth: 0, height: 48, marginBottom: 0,
+  },
+  emojiPickerTrigger: {
+    width: 58, height: 48, borderWidth: 1, borderRadius: 14,
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 3,
+  },
+  emojiPickerPreview: { fontSize: 27 },
+  emojiPickerPanel: {
+    borderWidth: 1, borderRadius: 14, padding: 10, marginBottom: 14,
+  },
+  emojiPickerHeader: {
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6,
+  },
+  emojiPickerGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  emojiPickerOption: {
+    width: 40, height: 40, borderWidth: 1, borderRadius: 10,
+    alignItems: 'center', justifyContent: 'center',
+  },
   goalTypeRow: {
     flexDirection: 'row',
     gap: 8,
+    marginBottom: 14,
   },
   goalTypeBtn: {
     flex: 1,
-    height: 42,
+    height: 44,
     paddingHorizontal: 10,
     borderRadius: 10,
     borderWidth: 1.5,
@@ -8426,7 +8157,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   goalTypeBtnText: {
-    fontSize: 13.5,
+    fontSize: 23,
     fontWeight: '700',
     textAlign: 'center',
   },
@@ -8652,16 +8383,16 @@ const styles = StyleSheet.create({
     width: 40,
     height: 44,
     borderRadius: 12,
-    backgroundColor: '#950101',
+    backgroundColor: '#484848',
     borderWidth: 1.5,
-    borderColor: '#FF0000',
+    borderColor: '#767676',
     alignItems: 'center',
     justifyContent: 'center',
   },
   datePickerBox: {
     backgroundColor: '#000000',
     borderWidth: 1.5,
-    borderColor: '#950101',
+    borderColor: '#484848',
     borderRadius: 14,
     padding: 12,
     marginBottom: 12,
@@ -8676,9 +8407,9 @@ const styles = StyleSheet.create({
     width: 34,
     height: 34,
     borderRadius: 17,
-    backgroundColor: '#3D0000',
+    backgroundColor: '#1C1C1C',
     borderWidth: 1,
-    borderColor: '#950101',
+    borderColor: '#484848',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -8700,7 +8431,7 @@ const styles = StyleSheet.create({
   calendarWeekdayText: {
     flex: 1,
     textAlign: 'center',
-    color: '#e0a3a3',
+    color: '#B5B5B5',
     fontSize: 12,
     fontWeight: '700',
   },
@@ -8747,7 +8478,7 @@ const styles = StyleSheet.create({
     fontWeight: '700',
   },
   timeStepperLabel: {
-    color: '#e0a3a3',
+    color: '#B5B5B5',
     fontSize: 11,
     fontWeight: '700',
     letterSpacing: 0.6,
@@ -8770,7 +8501,7 @@ const styles = StyleSheet.create({
     borderRadius: 14,
     backgroundColor: '#1a0000',
     borderWidth: 1.5,
-    borderColor: '#950101',
+    borderColor: '#484848',
     overflow: 'hidden',
     position: 'relative',
   },
@@ -8781,9 +8512,9 @@ const styles = StyleSheet.create({
     right: 6,
     height: WHEEL_ITEM_HEIGHT,
     borderRadius: 10,
-    backgroundColor: '#3D0000',
+    backgroundColor: '#1C1C1C',
     borderWidth: 1.5,
-    borderColor: '#FF0000',
+    borderColor: '#767676',
   },
   wheelScroll: {
     width: '100%',
@@ -8808,15 +8539,15 @@ const styles = StyleSheet.create({
     fontWeight: '600',
   },
   wheelColon: {
-    color: '#FF0000',
+    color: '#767676',
     fontSize: 28,
     fontWeight: '800',
     marginTop: 18,
   },
   datePreviewBanner: {
-    backgroundColor: '#950101',
+    backgroundColor: '#484848',
     borderWidth: 1,
-    borderColor: '#FF0000',
+    borderColor: '#767676',
     borderRadius: 12,
     paddingVertical: 10,
     paddingHorizontal: 12,
@@ -8830,3 +8561,4 @@ const styles = StyleSheet.create({
     textAlign: 'center',
   },
 });
+

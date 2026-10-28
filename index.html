@@ -4,13 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Günlük Rutin</title>
-  <meta name="theme-color" content="#fff4e6">
+  <meta name="theme-color" content="#080908">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="neon.css">
 </head>
 <body data-tab="beslenme">
+  <div class="neon-backdrop" aria-hidden="true"><i class="gold-ribbon ribbon-top"></i><i class="gold-ribbon ribbon-bottom"></i><i class="gold-orb"></i></div>
   <header class="topbar">
     <div class="topbar-head">
       <div class="top-mode-tabs" id="topModeTabs">
@@ -20,6 +22,8 @@
       <button type="button" id="profileBtn" class="profile-circle-btn" aria-label="Profil sayfasını aç" title="Profil"></button>
     </div>
   </header>
+
+  <nav class="tabs" role="tablist" aria-label="Kategoriler" id="tabs"></nav>
 
   <main id="panel" class="panel" role="tabpanel" aria-live="polite"></main>
 
@@ -40,7 +44,7 @@
   </button>
 
   <!-- Yarı Saydam (Glassmorphism) Alt Menü (Tab Bar) -->
-  <nav class="tabs" role="tablist" aria-label="Kategoriler" id="tabs"></nav>
+
 
   <!-- Basılı tutunca açılan renk menüsü -->
   <div id="menu" class="menu" popover="manual" role="menu" aria-label="İşaret rengi seç">
@@ -51,24 +55,66 @@
     <button type="button" role="menuitem" data-mark="" class="m-clear"><i class="dot n"></i> Temizle</button>
   </div>
 
+  <dialog id="categoryActions" class="editor" aria-labelledby="categoryActionsTitle">
+    <h2 id="categoryActionsTitle"></h2>
+    <div id="categoryDeleteMenu">
+      <button type="button" id="categoryEditOption" class="category-edit-option">Sekmeyi düzenle</button>
+      <button type="button" id="categoryDeleteOption" class="category-delete-option">Sekmeyi sil</button>
+      <p id="categoryDeleteCount" class="category-local-note"></p>
+      <p id="categoryLastTabNote" class="category-local-note" hidden>Son sekmeyi silmeden önce yeni bir sekme ekle.</p>
+      <div class="editor-actions"><span class="spacer"></span><button type="button" data-close-category-actions class="ghost">Kapat</button></div>
+    </div>
+    <div id="categoryDeleteConfirmation" hidden>
+      <h3>Bu sekme silinsin mi?</h3>
+      <p id="categoryDeleteDescription" class="category-delete-description"></p>
+      <div class="editor-actions"><span class="spacer"></span><button type="button" data-close-category-actions class="ghost">Vazgeç</button><button type="button" id="categoryDeleteConfirm" class="category-delete-confirm">Evet, sekmeyi sil</button></div>
+    </div>
+  </dialog>
+
+  <dialog id="categoryEditor" class="editor" aria-labelledby="categoryEditorTitle">
+    <form id="categoryForm">
+      <h2 id="categoryEditorTitle">Yeni sekme</h2>
+      <p class="category-local-note">Yeni sekmeler ve içindeki maddeler bu cihazda saklanır.</p>
+      <label for="categoryName">Sekme adı ve emoji</label>
+      <div class="habit-identity-row">
+        <button type="button" id="categoryEmojiBtn" class="emoji-picker-trigger" aria-label="Sekme emojisi seç" aria-controls="categoryEmojiChoices" aria-expanded="false"><span id="categoryEmojiPreview" aria-hidden="true">📁</span><small aria-hidden="true">▾</small></button>
+        <input id="categoryName" name="name" aria-label="Sekme adı" maxlength="40" autocomplete="off" placeholder="Örn. İş, Hobiler, Finans">
+      </div>
+      <div id="categoryEmojiChoices" class="emoji-picker-grid category-emoji-choices" hidden></div>
+      <span class="field-label">Tema rengi</span>
+      <div id="categoryColors" class="category-color-grid"></div>
+      <p id="categoryError" class="category-error" role="alert" hidden></p>
+      <div class="editor-actions">
+        <span class="spacer"></span>
+        <button type="button" id="cancelCategoryBtn" class="ghost">Vazgeç</button>
+        <button type="submit" class="category-create-btn">Sekme ekle</button>
+      </div>
+    </form>
+  </dialog>
+
   <!-- Ekle / düzenle (Karta basılı tutunca açılır) -->
   <dialog id="editor" class="editor" aria-labelledby="editorTitle">
     <form id="editorForm" method="dialog">
       <h2 id="editorTitle">Yeni madde</h2>
-      <label>Madde adı
-        <input name="name" required maxlength="60" autocomplete="off" placeholder="Örn. Diş fırçalama, Göğüs egzersizi">
-      </label>
+      <label for="habitName">Madde adı ve emoji</label>
+      <div class="habit-identity-row">
+        <button type="button" id="habitEmojiBtn" class="emoji-picker-trigger" aria-label="Emoji seç" aria-controls="emojiPicker" aria-expanded="false"><span id="habitEmojiPreview" aria-hidden="true">🥗</span><small aria-hidden="true">▾</small></button>
+        <input id="habitName" name="name" aria-label="Madde adı" required maxlength="60" autocomplete="off" placeholder="Örn. Diş fırçalama, Göğüs egzersizi">
+      </div>
+      <div id="emojiPicker" class="emoji-picker-panel" hidden>
+        <div class="emoji-picker-header"><span>Emoji seç</span><button type="button" id="autoEmojiBtn" aria-label="Otomatik emoji kullan">Otomatik</button></div>
+        <div id="emojiChoices" class="emoji-picker-grid"></div>
+      </div>
       <label>Hedef / not <span class="opt">(isteğe bağlı)</span>
         <input name="detail" maxlength="80" autocomplete="off" placeholder="Örn. Sabah & akşam, 3×12 tekrar">
       </label>
 
       <div class="field-block">
-        <span class="field-label">Sayaç / Tekrar / Miktar</span>
-        <div class="goal-type-row" id="goalTypeRow">
-          <button type="button" class="goal-type-btn active" data-goal-type="none">Yok</button>
-          <button type="button" class="goal-type-btn" data-goal-type="timer">⏱️ Sayaç</button>
-          <button type="button" class="goal-type-btn" data-goal-type="reps">🔁 Tekrar</button>
-          <button type="button" class="goal-type-btn" data-goal-type="amount">📊 Miktar</button>
+        <div class="goal-type-row" id="goalTypeRow" role="group" aria-label="Hedef türü">
+          <button type="button" class="goal-type-btn active" data-goal-type="none" aria-label="Hedef yok" title="Hedef yok" aria-pressed="true">⊘</button>
+          <button type="button" class="goal-type-btn" data-goal-type="timer" aria-label="Sayaç" title="Sayaç" aria-pressed="false">⏱️</button>
+          <button type="button" class="goal-type-btn" data-goal-type="reps" aria-label="Tekrar" title="Tekrar" aria-pressed="false">🔁</button>
+          <button type="button" class="goal-type-btn" data-goal-type="amount" aria-label="Miktar" title="Miktar" aria-pressed="false">📊</button>
         </div>
 
         <div id="goalTimerBox" class="goal-config-box" hidden>

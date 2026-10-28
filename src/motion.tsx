@@ -29,6 +29,7 @@ import Svg, {
   Rect,
   Stop,
 } from 'react-native-svg';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 const USE_NATIVE = Platform.OS !== 'web';
 
@@ -639,7 +640,7 @@ interface MicroIconProps {
   size?: number;
 }
 
-export function MicroIcon({ name, color, size = 13 }: MicroIconProps) {
+export const MicroIcon = React.memo(function MicroIcon({ name, color, size = 13 }: MicroIconProps) {
   if (name === 'flame') {
     // Minimal modern alev ikonu (katmanlı damla formu)
     return (
@@ -969,7 +970,7 @@ export function MicroIcon({ name, color, size = 13 }: MicroIconProps) {
       />
     </View>
   );
-}
+});
 
 // ───────── Yumuşak Gradyan Katmanı (Soft Gradient Sheen) ─────────
 export function SoftGradientOverlay({
@@ -1038,7 +1039,7 @@ interface StreakIconProps {
   style?: StyleProp<TextStyle>;
 }
 
-export function StreakIcon({
+export const StreakIcon = React.memo(function StreakIcon({
   streak,
   threshold = 3,
   color = '#F26B27',
@@ -1088,11 +1089,11 @@ export function StreakIcon({
       <MicroIcon
         name="flame"
         size={13}
-        color={streak > 0 ? color : 'rgba(148,163,184,0.7)'}
+        color={color}
       />
     </Animated.View>
   );
-}
+});
 
 // ───────── Animasyonlu yuvarlak onay kutusu (Görevler) ─────────
 interface AnimatedCheckCircleProps {
@@ -1173,22 +1174,62 @@ export function AnimatedCheckCircle({
   );
 }
 
-// ───────── Modal kartı: açılırken yaylı büyüme ─────────
+// ───────── Alt panel: alt kenardan açılma ve ortak boyut sınırları ─────────
 const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
-type SheetPressableProps = Omit<PressableProps, 'style'> & {
+type SheetPressableProps = Omit<PressableProps, 'style' | 'children'> & {
   style?: StyleProp<ViewStyle>;
+  children?: React.ReactNode;
+  onDismiss?: () => void;
 };
 
-export function SheetPressable({ style, ...rest }: SheetPressableProps) {
+export function SheetPressable({ style, children, onDismiss, onLayout, ...rest }: SheetPressableProps) {
+  const insets = useSafeAreaInsets();
   const v = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current;
+  const dragY = useRef(new Animated.Value(0)).current;
+  const sheetHeight = useRef(1000);
+  const dismissRef = useRef(onDismiss);
+  const dismissing = useRef(false);
+  dismissRef.current = onDismiss;
+
+  const resetDrag = () => {
+    if (reduceMotion) { dragY.setValue(0); return; }
+    Animated.spring(dragY, { toValue: 0, damping: 24, stiffness: 280, mass: 1, useNativeDriver: USE_NATIVE }).start();
+  };
+  const dismiss = () => {
+    if (dismissing.current || !dismissRef.current) return;
+    dismissing.current = true;
+    Animated.timing(dragY, {
+      toValue: sheetHeight.current + 32, duration: reduceMotion ? 0 : 160,
+      easing: Easing.out(Easing.cubic), useNativeDriver: USE_NATIVE,
+    }).start(({ finished }) => {
+      if (finished) dismissRef.current?.();
+      dragY.setValue(0);
+      dismissing.current = false;
+    });
+  };
+  const handlePan = useMemo(() => PanResponder.create({
+    onStartShouldSetPanResponder: () => !!dismissRef.current && !dismissing.current,
+    onStartShouldSetPanResponderCapture: () => !!dismissRef.current && !dismissing.current,
+    onMoveShouldSetPanResponder: (_, gesture) => !!dismissRef.current && !dismissing.current && Math.abs(gesture.dy) > 4 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
+    onPanResponderGrant: () => dragY.stopAnimation(),
+    onPanResponderMove: (_, gesture) => dragY.setValue(Math.max(0, gesture.dy)),
+    onPanResponderRelease: (_, gesture) => {
+      if (gesture.dy >= 72 || (gesture.dy > 16 && gesture.vy > 0.65)) dismiss();
+      else resetDrag();
+    },
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderTerminate: resetDrag,
+  }), [dragY]);
+
+  useEffect(() => () => dragY.stopAnimation(), [dragY]);
 
   useEffect(() => {
     if (reduceMotion) return;
-    const anim = Animated.spring(v, {
+    const anim = Animated.timing(v, {
       toValue: 1,
-      friction: 7,
-      tension: 110,
+      duration: 120,
+      easing: Easing.out(Easing.cubic),
       useNativeDriver: USE_NATIVE,
     });
     anim.start();
@@ -1198,9 +1239,18 @@ export function SheetPressable({ style, ...rest }: SheetPressableProps) {
 
   return (
     <AnimatedPressable
+      testID="bottom-sheet"
       {...rest}
+      onLayout={(event) => { sheetHeight.current = event.nativeEvent.layout.height; onLayout?.(event); }}
       style={[
         style,
+        {
+          width: '100%', maxWidth: 760, maxHeight: '85%', flexShrink: 1,
+          borderTopLeftRadius: 26, borderTopRightRadius: 26,
+          borderBottomLeftRadius: 0, borderBottomRightRadius: 0,
+          paddingTop: 30, paddingBottom: Math.max(insets.bottom + 16, 24),
+          overflow: 'hidden',
+        },
         {
           opacity: v.interpolate({
             inputRange: [0, 1],
@@ -1208,22 +1258,38 @@ export function SheetPressable({ style, ...rest }: SheetPressableProps) {
             extrapolate: 'clamp',
           }),
           transform: [
-            {
-              scale: v.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0.9, 1],
-              }),
-            },
+            { translateY: dragY },
             {
               translateY: v.interpolate({
                 inputRange: [0, 1],
-                outputRange: [24, 0],
+                outputRange: [64, 0],
+                extrapolate: 'clamp',
               }),
             },
           ],
         },
       ]}
-    />
+    >
+      <View
+        testID="bottom-sheet-handle"
+        {...handlePan.panHandlers}
+        {...(Platform.OS === 'web' && onDismiss ? {
+          tabIndex: 0,
+          onKeyDown: (event: Parameters<NonNullable<React.ComponentProps<typeof View>['onKeyDown']>>[0]) => {
+            const key = (event as unknown as { key?: string }).key;
+            if (key === 'Enter' || key === ' ') { event.preventDefault(); dismiss(); }
+          },
+        } : {})}
+        accessibilityRole={onDismiss ? 'button' : undefined}
+        accessibilityLabel={onDismiss ? 'Paneli kapat; aşağı sürükleyebilirsin' : undefined}
+        accessible={!!onDismiss}
+        onAccessibilityTap={onDismiss ? dismiss : undefined}
+        style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 30, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { touchAction: 'none', cursor: 'grab', userSelect: 'none' } as unknown as ViewStyle : {}) }}
+      >
+        <View pointerEvents="none" style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.3)' }} />
+      </View>
+      {children}
+    </AnimatedPressable>
   );
 }
 
@@ -2861,8 +2927,8 @@ export function SwipeableTaskRow({
     ignoreSwipeRef,
   };
 
-  const panResponder = useRef(
-    PanResponder.create({
+  const panResponder = useMemo(
+    () => PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponderCapture: (_, gs) => {
         const cur = callbacksRef.current;
@@ -2933,6 +2999,8 @@ export function SwipeableTaskRow({
 
         if (shouldRight) {
           isAnimatingOutRef.current = true;
+          // Commit completion on release instead of waiting for the spring to settle.
+          cur.onSwipeRight?.();
           Animated.parallel([
             Animated.spring(translateX, {
               toValue: 132,
@@ -2948,7 +3016,6 @@ export function SwipeableTaskRow({
               useNativeDriver: USE_NATIVE,
             }),
           ]).start(() => {
-            cur.onSwipeRight?.();
             Animated.parallel([
               Animated.spring(translateX, {
                 toValue: 0,
@@ -3023,8 +3090,9 @@ export function SwipeableTaskRow({
           }).start();
         }
       },
-    })
-  ).current;
+    }),
+    []
+  );
 
   const rightBgOpacity = translateX.interpolate({
     inputRange: [0, 10, 55],
@@ -3248,6 +3316,7 @@ export interface SpringDragItemControls {
   handleProps: any;
   /** Kart başlığına eklendiğinde ~170ms basılı tutunca yaylı sürükleme başlatır */
   longPressDragProps: any;
+  consumeLongPress: () => boolean;
 }
 
 export interface SpringDragListProps<T> {
@@ -3259,6 +3328,8 @@ export interface SpringDragListProps<T> {
   onStartHaptic?: () => void;
   onStepHaptic?: () => void;
   gap?: number;
+  axis?: 'vertical' | 'horizontal';
+  holdDelay?: number;
   accentColor?: string;
   borderRadius?: number;
   style?: StyleProp<ViewStyle>;
@@ -3278,6 +3349,8 @@ export function SpringDragList<T>({
   onStartHaptic,
   onStepHaptic,
   gap = 14,
+  axis = 'vertical',
+  holdDelay = 170,
   accentColor = '#22c55e',
   borderRadius = 16,
   style,
@@ -3470,6 +3543,13 @@ export function SpringDragList<T>({
 
     const { fromIdx, targetIdx, key, moved } = dragState;
     const item = cur.items[fromIdx];
+    if (!isCancel && !moved && item) cur.onLongPressNoDrag?.(item);
+    if (axis === 'horizontal' && !isCancel && targetIdx !== fromIdx) {
+      // Commit tab order on release; a pending spring must not delay or race the next gesture.
+      pendingResetKeyRef.current = key;
+      cur.onReorder(fromIdx, targetIdx);
+      return;
+    }
 
     let finalOffset = 0;
     if (!isCancel && targetIdx !== fromIdx) {
@@ -3515,15 +3595,12 @@ export function SpringDragList<T>({
           getLift(k).setValue(0);
         });
         setRowElevated(key, false);
-        if (!isCancel && !moved && item && cur.onLongPressNoDrag) {
-          cur.onLongPressNoDrag(item);
-        }
       }
     });
   };
 
   return (
-    <View style={[{ gap }, style]}>
+    <View style={[{ gap, flexDirection: axis === 'horizontal' ? 'row' : 'column' }, style]}>
       {items.map((item, idx) => {
         const key = keyExtractor(item);
         const ty = getTranslateY(key);
@@ -3534,6 +3611,8 @@ export function SpringDragList<T>({
             key={key}
             itemKey={key}
             index={idx}
+            axis={axis}
+            holdDelay={holdDelay}
             translateY={ty}
             lift={lift}
             accentColor={accentColor}
@@ -3556,6 +3635,8 @@ export function SpringDragList<T>({
 }
 
 interface SpringDragRowWrapperProps {
+  axis?: 'vertical' | 'horizontal';
+  holdDelay?: number;
   itemKey: string;
   index: number;
   translateY: Animated.Value;
@@ -3571,6 +3652,8 @@ interface SpringDragRowWrapperProps {
 }
 
 function SpringDragRowWrapper({
+  axis = 'vertical',
+  holdDelay = 170,
   itemKey,
   index,
   translateY,
@@ -3585,12 +3668,16 @@ function SpringDragRowWrapper({
   renderContent,
 }: SpringDragRowWrapperProps) {
   const cbRef = useRef({
+    axis,
+    holdDelay,
     index,
     onBeginDrag,
     onMoveDrag,
     onEndDrag,
   });
   cbRef.current = {
+    axis,
+    holdDelay,
     index,
     onBeginDrag,
     onMoveDrag,
@@ -3601,6 +3688,7 @@ function SpringDragRowWrapper({
   const armedByHoldRef = useRef(false);
   const handleActiveRef = useRef(false);
   const startPageRef = useRef({ x: 0, y: 0 });
+  const suppressPressRef = useRef(false);
 
   const clearHoldTimer = () => {
     if (holdTimerRef.current) {
@@ -3609,13 +3697,36 @@ function SpringDragRowWrapper({
     }
   };
 
+  const finishHold = (cancelled: boolean) => {
+    clearHoldTimer();
+    if (armedByHoldRef.current && !handleActiveRef.current) {
+      armedByHoldRef.current = false;
+      cbRef.current.onEndDrag(cancelled);
+    }
+  };
+
+  useEffect(() => {
+    if (Platform.OS !== 'web' || typeof window === 'undefined') return;
+    // Mouse releases do not emit touchend. Never leave a drag timer armed after a click.
+    const release = () => finishHold(false);
+    const cancel = () => finishHold(true);
+    window.addEventListener('pointerup', release, true);
+    window.addEventListener('pointercancel', cancel, true);
+    window.addEventListener('blur', cancel);
+    return () => {
+      window.removeEventListener('pointerup', release, true);
+      window.removeEventListener('pointercancel', cancel, true);
+      window.removeEventListener('blur', cancel);
+    };
+  }, []);
+
   useEffect(() => {
     return () => clearHoldTimer();
   }, []);
 
   // 1) `⠿` Tutamacı (veya Sırala modu kartı) için 0ms gecikmesiz başlayan PanResponder
-  const handlePanResponder = useRef(
-    PanResponder.create({
+  const handlePanResponder = useMemo(
+    () => PanResponder.create({
       onStartShouldSetPanResponder: () => {
         clearHoldTimer();
         armedByHoldRef.current = false;
@@ -3637,7 +3748,7 @@ function SpringDragRowWrapper({
         cbRef.current.onBeginDrag(cbRef.current.index);
       },
       onPanResponderMove: (_, gs) => {
-        cbRef.current.onMoveDrag(cbRef.current.index, gs.dy);
+        cbRef.current.onMoveDrag(cbRef.current.index, cbRef.current.axis === 'horizontal' ? gs.dx : gs.dy);
       },
       onPanResponderTerminationRequest: () => false,
       onPanResponderRelease: () => {
@@ -3648,16 +3759,18 @@ function SpringDragRowWrapper({
         handleActiveRef.current = false;
         cbRef.current.onEndDrag(true);
       },
-    })
-  ).current;
+    }),
+    []
+  );
 
   // 2) Kart Başlığı / Gövdesi üzerinde ~170ms basılı tutunca devreye giren Yaylı Sürükleme
-  const longPressPanResponder = useRef(
-    PanResponder.create({
+  const longPressPanResponder = useMemo(
+    () => PanResponder.create({
       onStartShouldSetPanResponderCapture: (evt) => {
         if (handleActiveRef.current) return false;
         clearHoldTimer();
         armedByHoldRef.current = false;
+        suppressPressRef.current = false;
         startPageRef.current = {
           x: evt.nativeEvent.pageX,
           y: evt.nativeEvent.pageY,
@@ -3666,8 +3779,9 @@ function SpringDragRowWrapper({
           holdTimerRef.current = null;
           if (handleActiveRef.current) return;
           armedByHoldRef.current = true;
+          suppressPressRef.current = true;
           cbRef.current.onBeginDrag(cbRef.current.index);
-        }, 170);
+        }, cbRef.current.holdDelay);
         return false;
       },
       onMoveShouldSetPanResponder: () =>
@@ -3689,7 +3803,7 @@ function SpringDragRowWrapper({
       },
       onPanResponderMove: (_, gs) => {
         if (armedByHoldRef.current && !handleActiveRef.current) {
-          cbRef.current.onMoveDrag(cbRef.current.index, gs.dy);
+          cbRef.current.onMoveDrag(cbRef.current.index, cbRef.current.axis === 'horizontal' ? gs.dx : gs.dy);
         }
       },
       onPanResponderTerminationRequest: () => false,
@@ -3707,8 +3821,9 @@ function SpringDragRowWrapper({
           cbRef.current.onEndDrag(true);
         }
       },
-    })
-  ).current;
+    }),
+    []
+  );
 
   const longPressDragProps = useMemo(
     () => ({
@@ -3741,20 +3856,27 @@ function SpringDragRowWrapper({
     outputRange: [0, 1],
   });
 
+  const controls = useMemo(() => ({
+    handleProps: handlePanResponder.panHandlers,
+    longPressDragProps,
+    consumeLongPress: () => {
+      const suppressed = suppressPressRef.current;
+      suppressPressRef.current = false;
+      return suppressed;
+    },
+  }), [handlePanResponder, longPressDragProps]);
+
   return (
     <Animated.View
       ref={(node) => onRegisterRowRef(itemKey, node as any)}
-      onLayout={(e) => onMeasureHeight(e.nativeEvent.layout.height)}
+      onLayout={(e) => onMeasureHeight(axis === 'horizontal' ? e.nativeEvent.layout.width : e.nativeEvent.layout.height)}
       style={{
         zIndex: 1,
         elevation: 0,
-        transform: [{ translateY }, { scale }],
+        transform: [axis === 'horizontal' ? { translateX: translateY } : { translateY }, { scale }],
       }}
     >
-      {renderContent({
-        handleProps: handlePanResponder.panHandlers,
-        longPressDragProps,
-      })}
+      {renderContent(controls)}
       {/* Sürüklenirken Kart Çevresinde Parlayan 3B Yaylı Vurgu Halkası */}
       <Animated.View
         pointerEvents="none"

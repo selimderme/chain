@@ -1,0 +1,22 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /user_backups/{userId} {
+      function ownsBackup() {
+        return request.auth != null && request.auth.uid == userId;
+      }
+      allow read, delete: if ownsBackup();
+      allow create, update: if ownsBackup()
+        && request.resource.data.keys().hasAll(['uid', 'updatedAt', 'syncedAt', 'stateJson'])
+        && request.resource.data.keys().hasOnly(['uid', 'updatedAt', 'syncedAt', 'stateJson'])
+        && request.resource.data.uid == userId
+        && request.resource.data.updatedAt is int
+        && request.resource.data.syncedAt is string
+        && request.resource.data.stateJson is string
+        && request.resource.data.stateJson.size() < 900000;
+    }
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
