@@ -6,12 +6,12 @@ const LONG_PRESS_MS = 450;
 const MOVE_TOLERANCE = 10;
 
 const TABS = [
-  { id: 'beslenme', name: 'Beslenme',          emoji: '🥗', color: '#F26B27', ink: '#10120A', motto: 'Vücuduna iyi bak, o da sana iyi baksın.' },
-  { id: 'egzersiz', name: 'Egzersiz',          emoji: '💪', color: '#C2ED19', ink: '#10120A', motto: 'Zinciri kırma. Bugün de çalış.' },
-  { id: 'bakim',    name: 'Kişisel Bakım',     emoji: '🧴', color: '#E54B8E', ink: '#10120A', motto: 'Kendine nazik ol, kendini şımart.' },
-  { id: 'ogrenme',  name: 'Öğrenme ve Gelişim', emoji: '📚', color: '#3B72EB', ink: '#FFFFFF', motto: 'Her gün biraz daha bilge.' },
-  { id: 'ibadet',   name: 'İbadet',            emoji: '🕌', color: '#C28E1E', ink: '#10120A', motto: 'Kalbine huzur, gününe bereket.' },
-  { id: 'kotu-aliskanliklar', name: 'Kötü Alışkanlıklar', emoji: '🚫', color: '#E5484D', ink: '#10120A', motto: 'Kötü alışkanlıkları bırak, hayatına yer aç.' },
+  { id: 'beslenme', name: 'Beslenme',          emoji: '🥗', color: '#66D9FF', ink: '#10120A', motto: 'Vücuduna iyi bak, o da sana iyi baksın.' },
+  { id: 'egzersiz', name: 'Egzersiz',          emoji: '💪', color: '#64E2C0', ink: '#10120A', motto: 'Zinciri kırma. Bugün de çalış.' },
+  { id: 'bakim',    name: 'Kişisel Bakım',     emoji: '🧴', color: '#F5A1D7', ink: '#10120A', motto: 'Kendine nazik ol, kendini şımart.' },
+  { id: 'ogrenme',  name: 'Öğrenme ve Gelişim', emoji: '📚', color: '#B6A0FF', ink: '#FFFFFF', motto: 'Her gün biraz daha bilge.' },
+  { id: 'ibadet',   name: 'İbadet',            emoji: '🕌', color: '#FFCB91', ink: '#10120A', motto: 'Kalbine huzur, gününe bereket.' },
+  { id: 'kotu-aliskanliklar', name: 'Kötü Alışkanlıklar', emoji: '🚫', color: '#FF8C9F', ink: '#10120A', motto: 'Kötü alışkanlıkları bırak, hayatına yer aç.' },
 ];
 
 const ICONS = {
@@ -206,7 +206,6 @@ let taskReorderMode = false;
 let taskFilter = 'all';
 let completedExpanded = true;
 let profileOpen = false;
-let profileSavedMsg = false;
 
 function getInitials(first, last) {
   const f = (first || '').trim();
@@ -276,10 +275,10 @@ function streaks(id, todayKey) {
   let cur = 0;
   let d = parseKey(todayKey);
   if (m[todayKey] !== 'g') d = addDays(d, -1); // bugün henüz işaretlenmediyse zincir bozulmaz
-  while (m[keyOf(d)] === 'g') { cur++; d = addDays(d, -1); }
+  while (m[todayKey] !== 'b' && m[todayKey] !== 'r' && m[keyOf(d)] === 'g') { cur++; d = addDays(d, -1); }
 
   let best = 0, run = 0;
-  const keys = Object.keys(m).filter((k) => m[k] === 'g').sort();
+  const keys = Object.keys(m).filter((k) => k <= todayKey && m[k] === 'g').sort();
   if (keys.length) {
     let prev = null;
     for (const k of keys) {
@@ -293,6 +292,8 @@ function streaks(id, todayKey) {
 
 /* ───────── Çizim ───────── */
 function render() {
+  window.ProfileWeb?.applyAppearance();
+  if (window.ProfileWeb?.renderSession()) { window.AuroraWeb?.render(); return; }
   const tab = getTabs().find((t) => t.id === state.tab) || TABS[0];
   const activeSec = state.section === 'gorevler' ? 'gorevler' : 'rutin';
   document.body.dataset.tab = tab.id;
@@ -302,13 +303,13 @@ function render() {
     document.body.style.setProperty('--accent', tab.color);
     document.body.style.setProperty('--accent-end', tab.color);
     document.body.style.setProperty('--accent-ink', tab.ink);
-    document.body.style.setProperty('--accent-soft', `color-mix(in srgb, ${tab.color} 14%, #10110f)`);
+    document.body.style.setProperty('--accent-soft', `color-mix(in srgb, ${tab.color} 14%, ${document.body.dataset.appearance === 'light' ? '#ffffff' : '#10110f'})`);
   }
   document.querySelector('meta[name="theme-color"]').content = getComputedStyle(document.body).getPropertyValue('--bg').trim() || '#fff';
   const initials = getInitials(state.profile?.firstName, state.profile?.lastName);
   const pBtn = $('#profileBtn');
   if (pBtn) {
-    pBtn.innerHTML = initials ? esc(initials) : ICONS.user;
+    pBtn.innerHTML = state.profile?.photoUri ? `<img src="${esc(state.profile.photoUri)}" alt="Profil fotoğrafı">` : initials ? esc(initials) : ICONS.user;
     pBtn.classList.toggle('active', profileOpen);
   }
   const gBtn = $('#floatingGearBtn');
@@ -331,6 +332,7 @@ function render() {
   if (profileOpen) renderProfilePage();
   else if (activeSec === 'gorevler') renderTasksPanel();
   else renderPanel(tab);
+  window.AuroraWeb?.render();
 }
 
 function renderTasksPanel() {
@@ -393,12 +395,12 @@ function renderTasksPanel() {
   ` : '';
 
   $('#panel').innerHTML = `
-    <div class="toolbar">
+    <div class="toolbar task-toolbar">
       <button type="button" class="${taskFilter === 'all' ? 'primary' : 'pill'}" data-task-filter="all">Görevlerim (${activeAll.length})</button>
       <button type="button" class="${taskFilter === 'starred' ? 'primary' : 'pill'}" data-task-filter="starred">★ Yıldızlı (${starredCount})</button>
       <span class="spacer"></span>
       ${taskFilter === 'all' && (activeAll.length > 1 || taskReorderMode) ? `<button type="button" class="${taskReorderMode ? 'primary' : 'pill'}" data-task-reorder>${taskReorderMode ? '✓ Bitti' : `${ICONS.sort} Sırala`}</button>` : ''}
-      ${taskReorderMode ? '' : '<button type="button" class="primary" data-task-add>＋ Madde ekle</button>'}
+      ${taskReorderMode ? '' : '<button type="button" class="primary" data-task-add>＋ Yeni görev</button>'}
     </div>
     ${taskReorderMode ? '' : `
       <div class="card task-quick-bar">
@@ -407,63 +409,30 @@ function renderTasksPanel() {
         <button type="button" class="primary" data-quick-task-submit style="padding:6px 12px">Ekle</button>
       </div>
     `}
-    <div class="list">${activeCards || `<p class="empty">${taskFilter === 'starred' ? 'Henüz yıldızlı görev yok. Görevlerin yanındaki ☆ simgesine dokunarak önemli görevleri buraya sabitleyebilirsin.' : 'Yapılacak görev yok. Yukarıdan hızlıca yazabilir veya “＋ Madde ekle” ile detaylı görev oluşturabilirsin.'}</p>`}</div>
+    <div class="list">${activeCards || `<p class="empty">${taskFilter === 'starred' ? 'Henüz yıldızlı görev yok. Görevlerin yanındaki ☆ simgesine dokunarak önemli görevleri buraya sabitleyebilirsin.' : 'Yapılacak görev yok. Yukarıdan hızlıca yazabilir veya “＋ Yeni görev” ile detaylı görev oluşturabilirsin.'}</p>`}</div>
     ${completedHTML}
   `;
 }
 
-function renderProfilePage() {
-  const { key: todayKey } = todayInfo();
-  const initials = getInitials(state.profile?.firstName, state.profile?.lastName);
-  const fullName = [state.profile?.firstName, state.profile?.lastName].filter(Boolean).join(' ').trim();
-  const allDoneToday = state.habits.filter((h) => getMark(h.id, todayKey) === 'g').length;
-  const totalMarked = Object.values(state.marks).reduce((acc, m) => acc + Object.keys(m || {}).length, 0);
-  const maxBest = state.habits.reduce((mx, h) => Math.max(mx, streaks(h.id, todayKey).best), 0);
-
-  $('#panel').innerHTML = `
-    <div class="profile-page">
-      <div style="display:flex;align-items:center;justify-content:space-between">
-        <button type="button" class="pill" data-close-profile>‹ Geri Dön</button>
-        <h2 style="margin:0;font-size:1.2rem">Profil ve Ayarlar</h2>
-        <span style="width:80px"></span>
-      </div>
-
-      <article class="card" style="text-align:center;padding:20px 16px">
-        <div class="profile-avatar-lg">${initials ? esc(initials) : ICONS.user}</div>
-        <h3 style="margin:0;font-size:1.25rem">${esc(fullName || 'Misafir Kullanıcı')}</h3>
-        <p class="detail" style="margin-top:4px">${fullName ? 'Günlük Plan Profili' : 'Günlük Plan Özeti'}</p>
-        <div class="profile-stats-grid">
-          <div class="profile-stat-box"><b>${state.habits.length}</b><small>Toplam Madde</small></div>
-          <div class="profile-stat-box"><b style="color:var(--green)">${allDoneToday}/${state.habits.length}</b><small>Bugün Tamam</small></div>
-          <div class="profile-stat-box"><b>${maxBest} gün</b><small>En Uzun Zincir</small></div>
-        </div>
-      </article>
-
-      <article class="card" style="padding:18px">
-        <h3 style="margin:0 0 8px;font-size:1.05rem">💾 Yedekleme ve Geri Yükleme</h3>
-        <p class="detail" style="line-height:1.45">Tüm alışkanlıklarınız, görevlerinizdeki maddeler, alt görevleriniz, zincirleriniz, ilerleme kayıtlarınız ve profil bilgileriniz cihazınızda saklanır. Verilerinizi yedekleyebilir veya istediğiniz zaman yedekten geri yükleyebilirsiniz.</p>
-        <div class="backup-info-box">
-          <div class="backup-info-row"><span>Kayıtlı Alışkanlık:</span><b>${state.habits.length} madde (${getTabs().length} kategori)</b></div>
-          <div class="backup-info-row"><span>Kayıtlı Görevler:</span><b>${(state.tasks || []).length} madde (${(state.tasks || []).filter((t) => !t.done).length} aktif, ${(state.tasks || []).filter((t) => t.done).length} tamamlanan)</b></div>
-          <div class="backup-info-row"><span>Toplam İşaretlenen Gün:</span><b>${totalMarked} kayıt</b></div>
-          <div class="backup-info-row"><span>Son Yedekleme:</span><b>${esc(state.profile?.lastBackupAt || 'Henüz yedek alınmadı')}</b></div>
-          <div class="backup-info-row"><span>Son Geri Yükleme:</span><b>${esc(state.profile?.lastRestoreAt || 'Henüz geri yükleme yapılmadı')}</b></div>
-        </div>
-        <div style="display:grid;gap:10px">
-          <button type="button" class="primary" style="width:100%;padding:11px" data-export-backup>📥 Yedekle (Dışa Aktar)</button>
-          <button type="button" class="pill" style="width:100%;padding:11px" data-import-backup>📤 Yedekten Yükle (Geri Yükle)</button>
-        </div>
-      </article>
-    </div>
-  `;
-}
+function renderProfilePage() { window.ProfileWeb?.renderProfilePage(); }
 
 function todayInfo() {
   const now = new Date();
   return { now, key: keyOf(now) };
 }
 
+function centerSelectedTab() {
+  const tabs = $('#tabs');
+  const active = $(`#tab-${state.tab}`);
+  if (!tabs || !active || !tabs.clientWidth) return;
+  const item = active.getBoundingClientRect();
+  const viewport = tabs.getBoundingClientRect();
+  const target = tabs.scrollLeft + item.left - viewport.left - tabs.clientLeft + item.width / 2 - tabs.clientWidth / 2;
+  tabs.scrollTo({ left: Math.max(0, Math.min(target, tabs.scrollWidth - tabs.clientWidth)), behavior: 'instant' });
+}
+
 function renderTabs() {
+  if(window.AuroraWeb?.renderTabs)return window.AuroraWeb.renderTabs();
   const { key } = todayInfo();
   $('#tabs').innerHTML = getTabs().map((t) => {
     const hs = state.habits.filter((h) => h.tab === t.id);
@@ -474,7 +443,7 @@ function renderTabs() {
       <span>${esc(t.name)}</span>
       <span class="t-count">${done}/${hs.length}</span>
     </button>`;
-  }).join('') + '<button type="button" class="add-tab-btn" data-add-tab aria-label="Yeni sekme ekle"><span aria-hidden="true">＋</span><small>Yeni sekme</small></button>';
+  }).join('') + '<button type="button" class="add-tab-btn" data-add-tab aria-label="Yeni sekme ekle">'+ICONS.plus+'</button>';
   $('#panel').setAttribute('aria-labelledby', `tab-${state.tab}`);
 }
 
@@ -526,6 +495,7 @@ function cellHTML(h, y, m, d, extra = '', inner = null) {
 }
 
 function renderPanel(tab) {
+  if(window.AuroraWeb?.renderPanel)return window.AuroraWeb.renderPanel(tab);
   const { now, key: todayKey } = todayInfo();
   const habits = state.habits.filter((h) => h.tab === tab.id);
   const doneToday = habits.filter((h) => getMark(h.id, todayKey) === 'g').length;
@@ -582,7 +552,7 @@ function renderPanel(tab) {
           </div>
         </div>
         <div class="card-actions">
-          ${cellHTML(h, now.getFullYear(), now.getMonth(), now.getDate(), 'today-btn', `<small>Bugün</small>${now.getDate()}`)}
+          ${cellHTML(h, now.getFullYear(), now.getMonth(), now.getDate(), 'today-btn', `<small>Bugün</small>${({g:'✓',b:'!',r:'×'})[getMark(h.id,todayKey)] || '＋'}`)}
         </div>
       </div>
       <div class="chain ${monthlyViewMode ? 'monthly' : 'weekly'}" role="group" aria-label="${esc(h.name)} aylık zincir" style="--days: ${dim}">${cells}</div>
@@ -627,7 +597,6 @@ $('#topModeTabs')?.addEventListener('click', (e) => {
 });
 
 const toggleProfileAndSettings = () => {
-  profileSavedMsg = false;
   profileOpen = !profileOpen;
   reorderMode = false;
   taskReorderMode = false;
@@ -655,7 +624,7 @@ $('#tabs').addEventListener('click', (e) => {
     void panel.offsetWidth;
     panel.classList.add('enter');
   }
-  $(`#tab-${state.tab}`)?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  centerSelectedTab();
 });
 $('#tabs').addEventListener('keydown', (e) => {
   suppressTabClick = false;
@@ -768,6 +737,7 @@ function cancelPress() {
 
 panel.addEventListener('pointerdown', (e) => {
   if (e.pointerType === 'mouse' && e.button !== 0) return;
+  habitClickBlocked = false;
   const cell = e.target.closest('[data-cell]');
   if (cell) {
     if (cell.disabled) return;
@@ -790,8 +760,7 @@ panel.addEventListener('pointerdown', (e) => {
       press.fired = true;
       card.classList.remove('pressing');
       navigator.vibrate?.(30);
-      const h = state.habits.find((x) => x.id === card.dataset.habit);
-      if (h) openEditor(h);
+      beginHabitDrag(card, e);
     }, LONG_PRESS_MS);
   }
 });
@@ -815,7 +784,7 @@ panel.addEventListener('contextmenu', (e) => {
   const card = e.target.closest('.card[data-habit]');
   if (card && !reorderMode && !e.target.closest('button')) {
     e.preventDefault();
-    if (!press.fired) {
+    if (!press.fired && !drag) {
       const h = state.habits.find((x) => x.id === card.dataset.habit);
       if (h) openEditor(h);
     }
@@ -825,15 +794,6 @@ panel.addEventListener('contextmenu', (e) => {
 panel.addEventListener('click', (e) => {
   if (e.target.closest('[data-close-profile]')) {
     profileOpen = false;
-    render();
-    return;
-  }
-  if (e.target.closest('[data-save-profile]')) {
-    const first = ($('#profFirstName')?.value || '').trim();
-    const last = ($('#profLastName')?.value || '').trim();
-    state.profile = { ...(state.profile || {}), firstName: first, lastName: last };
-    save();
-    profileSavedMsg = true;
     render();
     return;
   }
@@ -850,7 +810,8 @@ panel.addEventListener('click', (e) => {
     if (press.fired) { press.fired = false; return; } // uzun basma sonrası gelen click'i yoksay
     if (cell.disabled) return;
     const { id, date } = cell.dataset;
-    setMark(id, date, getMark(id, date) ? '' : 'g');
+    const current = getMark(id, date);
+    setMark(id, date, (cell.hasAttribute('data-complete') ? current === 'g' : !!current) ? '' : 'g');
     return;
   }
   if (e.target.closest('[data-monthly]')) { monthlyViewMode = !monthlyViewMode; render(); return; }
@@ -956,6 +917,8 @@ function quickAddTask() {
 /* ───────── Sıralama ───────── */
 const tabHabits = () => state.habits.filter((h) => h.tab === state.tab);
 function applyOrder(ids) {
+  const current = tabHabits().map(h => h.id);
+  if (ids.length !== current.length || new Set(ids).size !== ids.length || ids.some(id => !current.includes(id))) return;
   // Sekmedeki maddeleri, genel listedeki kendi yerlerine yeni sırayla geri koy
   const slots = [];
   state.habits.forEach((h, i) => { if (h.tab === state.tab) slots.push(i); });
@@ -964,34 +927,85 @@ function applyOrder(ids) {
   save();
 }
 
-let drag = null;
-panel.addEventListener('pointerdown', (e) => {
-  const handle = e.target.closest('[data-handle]');
-  if (!handle) return;
-  e.preventDefault();
-  const card = handle.closest('.card');
-  handle.setPointerCapture(e.pointerId);
+let drag = null, habitClickBlocked = false;
+function beginHabitDrag(card, event) {
+  if (drag || tabHabits().length < 2 || !card.isConnected) return;
+  cancelPress();
+  press.fired = habitClickBlocked = true;
+  const rect = card.getBoundingClientRect(), placeholder = document.createElement('div');
+  placeholder.className = 'habit-drag-placeholder';
+  placeholder.style.height = rect.height + 'px';
+  placeholder.setAttribute('aria-hidden', 'true');
+  card.before(placeholder);
+  drag = { card, list: card.parentElement, placeholder, id: event.pointerId, tab: state.tab,
+    x: event.clientX, y: event.clientY, offsetY: event.clientY - rect.top, left: rect.left, frame: 0 };
+  card.classList.remove('pressing', 'aurora-card-enter');
   card.classList.add('dragging');
-  drag = { card, handle, list: card.parentElement, id: e.pointerId };
+  card.setAttribute('aria-grabbed', 'true');
+  Object.assign(card.style, { position: 'fixed', left: rect.left + 'px', top: rect.top + 'px', width: rect.width + 'px', margin: '0', zIndex: '1000', pointerEvents: 'none' });
+  document.body.classList.add('habit-drag-active');
+  panel.setPointerCapture?.(event.pointerId);
+  navigator.vibrate?.(25);
+  const tick = () => {
+    if (!drag) return;
+    const d = drag;
+    if (!d.card.isConnected || state.tab !== d.tab) { endDrag(null, true); return; }
+    // Scroll continues while the finger rests near either edge, including above the dock.
+    const bottom = innerHeight - 110, top = 85;
+    const step = d.y < top ? -Math.min(15, (top - d.y) * .3) : d.y > bottom ? Math.min(15, (d.y - bottom) * .3) : 0;
+    if (step) window.scrollBy(0, step);
+    d.card.style.top = (d.y - d.offsetY) + 'px';
+    const siblings = [...d.list.querySelectorAll('.card[data-habit]')].filter(node => node !== d.card);
+    const next = siblings.find(node => { const r = node.getBoundingClientRect(); return d.y < r.top + r.height / 2; });
+    if (next) { if (d.placeholder.nextElementSibling !== next) d.list.insertBefore(d.placeholder, next); }
+    else if (d.list.lastElementChild !== d.placeholder) d.list.append(d.placeholder);
+    d.frame = requestAnimationFrame(tick);
+  };
+  drag.frame = requestAnimationFrame(tick);
+}
+panel.addEventListener('pointerdown', (e) => {
+  if (e.button !== 0 || drag || (e.target.closest('button, input, a, [data-cell]') && !e.target.closest('[data-handle]'))) return;
+  const card = e.target.closest('.card[data-habit]');
+  if (!card || (!reorderMode && !e.target.closest('[data-handle]'))) return;
+  e.preventDefault();
+  beginHabitDrag(card, e);
 });
-panel.addEventListener('pointermove', (e) => {
+window.addEventListener('pointermove', (e) => {
   if (!drag || e.pointerId !== drag.id) return;
-  if (e.clientY < 90) scrollBy(0, -14);
-  else if (e.clientY > innerHeight - 90) scrollBy(0, 14);
-  const over = document.elementFromPoint(panel.getBoundingClientRect().left + 20, e.clientY)?.closest('.card.compact');
-  if (!over || over === drag.card || over.parentElement !== drag.list) return;
-  const r = over.getBoundingClientRect();
-  drag.list.insertBefore(drag.card, e.clientY < r.top + r.height / 2 ? over : over.nextSibling);
-});
-function endDrag(e) {
-  if (!drag || e.pointerId !== drag.id) return;
-  const ids = [...drag.list.querySelectorAll('.card.compact')].map((c) => c.dataset.habit);
-  drag = null;
-  applyOrder(ids);
+  e.preventDefault();
+  drag.x = e.clientX; drag.y = e.clientY;
+}, { passive: false });
+// Prevent native scrolling only after the hold has activated; ordinary swipes still scroll.
+panel.addEventListener('touchmove', e => { if (drag) e.preventDefault(); }, { passive: false });
+function endDrag(e, cancelled = false) {
+  if (!drag || (e && e.pointerId !== drag.id)) return;
+  const d = drag; drag = null;
+  cancelAnimationFrame(d.frame);
+  d.placeholder.replaceWith(d.card);
+  d.card.classList.remove('dragging');
+  d.card.removeAttribute('aria-grabbed');
+  for (const key of ['position', 'left', 'top', 'width', 'margin', 'zIndex', 'pointerEvents']) d.card.style[key] = '';
+  document.body.classList.remove('habit-drag-active');
+  if (panel.hasPointerCapture?.(d.id)) panel.releasePointerCapture(d.id);
+  habitClickBlocked = true;
+  if (!cancelled && state.tab === d.tab) {
+    const ids = [...d.list.querySelectorAll('.card[data-habit]')].map(c => c.dataset.habit);
+    applyOrder(ids);
+  }
   render();
 }
-panel.addEventListener('pointerup', endDrag);
-panel.addEventListener('pointercancel', endDrag);
+window.addEventListener('pointerup', e => endDrag(e), true);
+window.addEventListener('pointercancel', e => endDrag(e, true), true);
+panel.addEventListener('lostpointercapture', e => endDrag(e, true));
+window.addEventListener('blur', () => { cancelPress(); endDrag(null, true); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) { cancelPress(); endDrag(null, true); } });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { cancelPress(); endDrag(null, true); } });
+panel.addEventListener('click', e => {
+  if (habitClickBlocked && (e.target.closest('.card[data-habit]') || e.target === panel)) {
+    habitClickBlocked = false;
+    e.preventDefault(); e.stopImmediatePropagation();
+  }
+}, true);
 
 /* ───────── Renk menüsü ───────── */
 function openMenu(cell) {
@@ -1034,7 +1048,128 @@ let editing = null;
 let currentGoalType = 'none';
 let editorSubtasks = [];
 let editorEmoji = '';
-const HABIT_EMOJIS = ['🍳', '🥗', '🍊', '🍎', '🥑', '💧', '☕', '🔥', '💪', '🏋️', '🏃', '🚴', '🧘', '🏊', '🚶', '⚽', '🌿', '🪥', '🧴', '🚿', '😴', '💊', '📖', '✍️', '🎓', '💻', '🎨', '🎵', '🌙', '🤲', '🕌', '❤️', '🛡️', '🎯', '⭐', '✅'];
+const HABIT_EMOJIS = [
+  { emoji: '🍳', label: 'Yumurta' }, { emoji: '🥗', label: 'Salata' },
+  { emoji: '🍊', label: 'Portakal' }, { emoji: '🍎', label: 'Elma' },
+  { emoji: '🥑', label: 'Avokado' }, { emoji: '💧', label: 'Su' },
+  { emoji: '☕', label: 'Kahve' }, { emoji: '🍵', label: 'Çay' },
+  { emoji: '🥛', label: 'Süt' }, { emoji: '🥣', label: 'Kase' },
+  { emoji: '🍌', label: 'Muz' }, { emoji: '🍓', label: 'Çilek' },
+  { emoji: '🥦', label: 'Brokoli' }, { emoji: '🥕', label: 'Havuç' },
+  { emoji: '🥒', label: 'Salatalık' }, { emoji: '🍅', label: 'Domates' },
+  { emoji: '🥜', label: 'Kuruyemiş' }, { emoji: '🍞', label: 'Ekmek' },
+  { emoji: '🧀', label: 'Peynir' }, { emoji: '🍗', label: 'Tavuk' },
+  { emoji: '🐟', label: 'Balık' }, { emoji: '🍚', label: 'Pilav' },
+  { emoji: '🍲', label: 'Yemek' }, { emoji: '🍽️', label: 'Öğün' },
+  { emoji: '💪', label: 'Kas' }, { emoji: '🏋️', label: 'Ağırlık' },
+  { emoji: '🏃', label: 'Koşu' }, { emoji: '🚴', label: 'Bisiklet' },
+  { emoji: '🧘', label: 'Meditasyon' }, { emoji: '🏊', label: 'Yüzme' },
+  { emoji: '🚶', label: 'Yürüyüş' }, { emoji: '⚽', label: 'Futbol' },
+  { emoji: '🏀', label: 'Basketbol' }, { emoji: '🎾', label: 'Tenis' },
+  { emoji: '🏐', label: 'Voleybol' }, { emoji: '🥊', label: 'Boks' },
+  { emoji: '🥋', label: 'Dövüş sanatları' }, { emoji: '🤸', label: 'Jimnastik' },
+  { emoji: '🧗', label: 'Tırmanış' }, { emoji: '🏄', label: 'Sörf' },
+  { emoji: '⛷️', label: 'Kayak' }, { emoji: '🛼', label: 'Paten' },
+  { emoji: '🏓', label: 'Masa tenisi' }, { emoji: '🏸', label: 'Badminton' },
+  { emoji: '🤾', label: 'Hentbol' }, { emoji: '🏹', label: 'Okçuluk' },
+  { emoji: '👟', label: 'Spor ayakkabı' }, { emoji: '🏅', label: 'Madalya' },
+  { emoji: '🌿', label: 'Yaprak' }, { emoji: '🪥', label: 'Diş fırçası' },
+  { emoji: '🧴', label: 'Bakım' }, { emoji: '🚿', label: 'Duş' },
+  { emoji: '😴', label: 'Uyku' }, { emoji: '💊', label: 'İlaç' },
+  { emoji: '🧼', label: 'Sabun' }, { emoji: '🛁', label: 'Banyo' },
+  { emoji: '🧽', label: 'Sünger' }, { emoji: '🪒', label: 'Tıraş' },
+  { emoji: '💇', label: 'Saç kesimi' }, { emoji: '💅', label: 'Tırnak bakımı' },
+  { emoji: '💆', label: 'Masaj' }, { emoji: '🧖', label: 'Sauna' },
+  { emoji: '🦷', label: 'Diş' }, { emoji: '🩺', label: 'Sağlık kontrolü' },
+  { emoji: '🩹', label: 'Yara bandı' }, { emoji: '🌡️', label: 'Termometre' },
+  { emoji: '🛌', label: 'Dinlenme' }, { emoji: '👁️', label: 'Göz sağlığı' },
+  { emoji: '🫁', label: 'Nefes' }, { emoji: '🧠', label: 'Zihin sağlığı' },
+  { emoji: '🦴', label: 'Kemik sağlığı' }, { emoji: '🧬', label: 'Biyoloji' },
+  { emoji: '📖', label: 'Kitap' }, { emoji: '✍️', label: 'Yazı' },
+  { emoji: '🎓', label: 'Eğitim' }, { emoji: '💻', label: 'Bilgisayar' },
+  { emoji: '📚', label: 'Kitaplar' }, { emoji: '📓', label: 'Defter' },
+  { emoji: '📝', label: 'Not alma' }, { emoji: '✏️', label: 'Kalem' },
+  { emoji: '🔬', label: 'Bilim' }, { emoji: '🔭', label: 'Astronomi' },
+  { emoji: '🧮', label: 'Matematik' }, { emoji: '🧪', label: 'Deney' },
+  { emoji: '🌍', label: 'Coğrafya' }, { emoji: '🗣️', label: 'Konuşma pratiği' },
+  { emoji: '🔤', label: 'Dil öğrenme' }, { emoji: '📐', label: 'Geometri' },
+  { emoji: '🧩', label: 'Bulmaca' }, { emoji: '♟️', label: 'Satranç' },
+  { emoji: '💡', label: 'Fikir' }, { emoji: '📑', label: 'Araştırma' },
+  { emoji: '🏫', label: 'Okul' }, { emoji: '🎒', label: 'Okul çantası' },
+  { emoji: '👨‍🏫', label: 'Ders' }, { emoji: '🗺️', label: 'Harita' },
+  { emoji: '💼', label: 'İş' }, { emoji: '📁', label: 'Klasör' },
+  { emoji: '📋', label: 'Yapılacaklar' }, { emoji: '📅', label: 'Takvim' },
+  { emoji: '⏰', label: 'Alarm' }, { emoji: '⏱️', label: 'Odak süresi' },
+  { emoji: '📊', label: 'Rapor' }, { emoji: '📈', label: 'Büyüme' },
+  { emoji: '📧', label: 'E-posta' }, { emoji: '📞', label: 'Telefon görüşmesi' },
+  { emoji: '🤝', label: 'Toplantı' }, { emoji: '🏢', label: 'Ofis' },
+  { emoji: '💰', label: 'Para' }, { emoji: '💳', label: 'Kart' },
+  { emoji: '🏦', label: 'Banka' }, { emoji: '🪙', label: 'Birikim' },
+  { emoji: '🧾', label: 'Fatura' }, { emoji: '💸', label: 'Harcama' },
+  { emoji: '🛒', label: 'Alışveriş' }, { emoji: '📦', label: 'Paket' },
+  { emoji: '🗂️', label: 'Dosya düzeni' }, { emoji: '🖥️', label: 'Masaüstü bilgisayar' },
+  { emoji: '⌨️', label: 'Klavye' }, { emoji: '🖨️', label: 'Yazıcı' },
+  { emoji: '🎨', label: 'Sanat' }, { emoji: '🎵', label: 'Müzik' },
+  { emoji: '🎸', label: 'Gitar' }, { emoji: '🎹', label: 'Piyano' },
+  { emoji: '🎻', label: 'Keman' }, { emoji: '🥁', label: 'Davul' },
+  { emoji: '🎤', label: 'Şarkı söyleme' }, { emoji: '🎧', label: 'Dinleme' },
+  { emoji: '📷', label: 'Fotoğraf' }, { emoji: '🎬', label: 'Film' },
+  { emoji: '🎭', label: 'Tiyatro' }, { emoji: '🖌️', label: 'Resim' },
+  { emoji: '🧶', label: 'Örgü' }, { emoji: '🪡', label: 'Dikiş' },
+  { emoji: '💃', label: 'Dans' }, { emoji: '🎮', label: 'Oyun' },
+  { emoji: '🎲', label: 'Masa oyunu' }, { emoji: '🪴', label: 'Bitki bakımı' },
+  { emoji: '🍰', label: 'Pasta yapımı' }, { emoji: '🪁', label: 'Uçurtma' },
+  { emoji: '🛠️', label: 'El işi' }, { emoji: '🏺', label: 'Seramik' },
+  { emoji: '🎷', label: 'Saksafon' }, { emoji: '🪈', label: 'Flüt' },
+  { emoji: '🌙', label: 'Ay' }, { emoji: '🤲', label: 'Dua' },
+  { emoji: '🕌', label: 'Cami' }, { emoji: '📿', label: 'Tesbih' },
+  { emoji: '🕋', label: 'Kâbe' }, { emoji: '☪️', label: 'Hilal ve yıldız' },
+  { emoji: '🙏', label: 'Şükür' }, { emoji: '🕊️', label: 'Barış' },
+  { emoji: '🕯️', label: 'Mum' }, { emoji: '✨', label: 'Parıltı' },
+  { emoji: '🌅', label: 'Gün doğumu' }, { emoji: '🌌', label: 'Gece gökyüzü' },
+  { emoji: '🤍', label: 'Beyaz kalp' }, { emoji: '💛', label: 'Sarı kalp' },
+  { emoji: '💚', label: 'Yeşil kalp' }, { emoji: '💜', label: 'Mor kalp' },
+  { emoji: '🪷', label: 'Lotus' }, { emoji: '🍃', label: 'Esinti' },
+  { emoji: '🫶', label: 'Sevgi' }, { emoji: '😌', label: 'Huzur' },
+  { emoji: '🌸', label: 'Çiçek' }, { emoji: '🌻', label: 'Ayçiçeği' },
+  { emoji: '🌈', label: 'Gökkuşağı' }, { emoji: '☀️', label: 'Güneş' },
+  { emoji: '🏠', label: 'Ev' }, { emoji: '🧹', label: 'Süpürme' },
+  { emoji: '🧺', label: 'Çamaşır' }, { emoji: '🛏️', label: 'Yatak toplama' },
+  { emoji: '🛋️', label: 'Salon' }, { emoji: '🪣', label: 'Temizlik' },
+  { emoji: '🗑️', label: 'Çöp' }, { emoji: '♻️', label: 'Geri dönüşüm' },
+  { emoji: '🔑', label: 'Anahtar' }, { emoji: '🚪', label: 'Kapı' },
+  { emoji: '🪟', label: 'Havalandırma' }, { emoji: '🧯', label: 'Ev güvenliği' },
+  { emoji: '🐈', label: 'Kedi bakımı' }, { emoji: '🐕', label: 'Köpek bakımı' },
+  { emoji: '🐾', label: 'Evcil hayvan' }, { emoji: '🌱', label: 'Fidan' },
+  { emoji: '🌳', label: 'Ağaç' }, { emoji: '🌷', label: 'Lale' },
+  { emoji: '🛍️', label: 'Alışveriş çantası' }, { emoji: '🧰', label: 'Tamir' },
+  { emoji: '💐', label: 'Buket' }, { emoji: '👕', label: 'Kıyafet' },
+  { emoji: '🧦', label: 'Çorap' }, { emoji: '🪞', label: 'Ayna' },
+  { emoji: '❤️', label: 'Kalp' }, { emoji: '👨‍👩‍👧', label: 'Aile' },
+  { emoji: '👥', label: 'Arkadaşlar' }, { emoji: '💬', label: 'Sohbet' },
+  { emoji: '🎁', label: 'Hediye' }, { emoji: '🎂', label: 'Doğum günü' },
+  { emoji: '🎉', label: 'Kutlama' }, { emoji: '💌', label: 'Mektup' },
+  { emoji: '🫂', label: 'Sarılma' }, { emoji: '👋', label: 'Selamlaşma' },
+  { emoji: '✈️', label: 'Uçak' }, { emoji: '🚗', label: 'Araba' },
+  { emoji: '🚆', label: 'Tren' }, { emoji: '🚌', label: 'Otobüs' },
+  { emoji: '⛺', label: 'Kamp' }, { emoji: '🏖️', label: 'Plaj' },
+  { emoji: '⛰️', label: 'Dağ' }, { emoji: '🧳', label: 'Valiz' },
+  { emoji: '🧭', label: 'Keşif' }, { emoji: '🌎', label: 'Seyahat' },
+  { emoji: '🚢', label: 'Gemi' }, { emoji: '🏛️', label: 'Müze' },
+  { emoji: '🎡', label: 'Lunapark' }, { emoji: '🏕️', label: 'Doğa gezisi' },
+  { emoji: '🛡️', label: 'Kalkan' }, { emoji: '🎯', label: 'Hedef' },
+  { emoji: '⭐', label: 'Yıldız' }, { emoji: '✅', label: 'Onay' },
+  { emoji: '🔥', label: 'Alev' }, { emoji: '🚀', label: 'Roket' },
+  { emoji: '🏆', label: 'Kupa' }, { emoji: '💎', label: 'Elmas' },
+  { emoji: '⚡', label: 'Enerji' }, { emoji: '🔔', label: 'Hatırlatma' },
+  { emoji: '📌', label: 'Öncelik' }, { emoji: '🚫', label: 'Bırakma hedefi' },
+  { emoji: '🔒', label: 'Kararlılık' }, { emoji: '🔓', label: 'Özgürlük' },
+  { emoji: '🔄', label: 'Tekrar' }, { emoji: '📵', label: 'Ekransız zaman' },
+  { emoji: '🚭', label: 'Sigarasız yaşam' }, { emoji: '🔗', label: 'Zincir' },
+  { emoji: '🪜', label: 'Adım adım' }, { emoji: '🌟', label: 'Başarı' },
+  { emoji: '💯', label: 'Tamamlama' }, { emoji: '🎖️', label: 'Başarı rozeti' },
+  { emoji: '🙌', label: 'Başardım' }, { emoji: '👍', label: 'Olumlu adım' },
+];
 
 const categoryEditor = $('#categoryEditor');
 let categoryEmoji = '📁';
@@ -1042,7 +1177,7 @@ let categoryColor = CUSTOM_TAB_COLORS[0].color;
 let editingCategoryId = null;
 function renderCategoryChoices() {
   $('#categoryEmojiPreview').textContent = categoryEmoji;
-  $('#categoryEmojiChoices').innerHTML = ['📁', ...HABIT_EMOJIS].map(emoji => `<button type="button" class="emoji-picker-option" data-category-emoji="${emoji}" aria-label="Sekme emojisi: ${emoji}" aria-pressed="${categoryEmoji === emoji}">${emoji}</button>`).join('');
+  renderEmojiBrowser('categoryEmojiChoices', categoryEmoji, 'data-category-emoji');
   $('#categoryColors').innerHTML = CUSTOM_TAB_COLORS.map(option => `<button type="button" class="category-color-option" data-category-color="${option.color}" aria-label="Renk: ${option.label}" aria-pressed="${categoryColor === option.color}" style="--swatch:${option.color};--swatch-ink:${getAccentInk(option.color)}"><span>${categoryColor === option.color ? '✓' : ''}</span></button>`).join('');
   categoryEditor.style.setProperty('--category-color', categoryColor);
   categoryEditor.style.setProperty('--category-ink', getAccentInk(categoryColor));
@@ -1050,6 +1185,7 @@ function renderCategoryChoices() {
 function openCategoryEditor(id = null) {
   const tab = id ? getTabs().find(tab => tab.id === id) : null;
   editingCategoryId = tab?.id || null;
+  $('#categoryColorField').hidden = !tab;
   $('#categoryForm').reset();
   categoryEmoji = tab?.emoji || '📁'; categoryColor = tab?.color || CUSTOM_TAB_COLORS[0].color;
   $('#categoryName').value = tab?.name || '';
@@ -1058,12 +1194,14 @@ function openCategoryEditor(id = null) {
   $('#categoryEmojiChoices').hidden = true;
   $('#categoryEmojiBtn').setAttribute('aria-expanded', 'false');
   $('#categoryError').hidden = true;
+  renderEmojiBrowser('categoryEmojiChoices', categoryEmoji, 'data-category-emoji', true);
   renderCategoryChoices(); categoryEditor.showModal(); $('#categoryName').focus();
 }
 $('#categoryEmojiBtn').addEventListener('click', () => {
   const open = $('#categoryEmojiChoices').hidden;
   $('#categoryEmojiChoices').hidden = !open;
   $('#categoryEmojiBtn').setAttribute('aria-expanded', String(open));
+  if (open) revealEmojiSelection('categoryEmojiChoices');
 });
 $('#categoryEmojiChoices').addEventListener('click', event => {
   const button = event.target.closest('[data-category-emoji]');
@@ -1097,7 +1235,7 @@ $('#categoryForm').addEventListener('submit', event => {
   }
   state.section = 'rutin'; profileOpen = false; reorderMode = false;
   save(); categoryEditor.close(); render();
-  $(`#tab-${tab.id}`)?.scrollIntoView({ inline: 'center', block: 'nearest' });
+  centerSelectedTab();
 });
 $('#cancelCategoryBtn').addEventListener('click', () => categoryEditor.close());
 categoryEditor.addEventListener('click', event => { if (event.target === categoryEditor) categoryEditor.close(); });
@@ -1145,9 +1283,27 @@ $('#categoryDeleteConfirm').addEventListener('click', () => {
   save(); categoryActions.close(); render();
 });
 
+function renderEmojiBrowser(rootId, value, attribute, reset = false) {
+  const root = document.getElementById(rootId);
+  let gallery = root.querySelector('.emoji-gallery');
+  if (!gallery) {
+    root.innerHTML = '<div class="emoji-gallery" aria-label="Emoji seçenekleri" tabindex="0"></div>';
+    gallery = root.querySelector('.emoji-gallery');
+    const label = attribute === 'data-category-emoji' ? 'Sekme emojisi' : 'Emoji';
+    gallery.innerHTML = HABIT_EMOJIS.map(option => `<button type="button" class="emoji-picker-option" ${attribute}="${option.emoji}" aria-label="${label}: ${esc(option.label)}" title="${esc(option.label)}" aria-pressed="false">${option.emoji}</button>`).join('');
+  }
+  gallery.querySelectorAll('.emoji-picker-option').forEach(button => button.setAttribute('aria-pressed', String(button.getAttribute(attribute) === value)));
+  if (reset) gallery.scrollLeft = 0;
+}
+
+function revealEmojiSelection(rootId) {
+  const root = document.getElementById(rootId);
+  root.querySelector('.emoji-picker-option[aria-pressed="true"]')?.scrollIntoView({ inline: 'center', block: 'nearest' });
+}
+
 function renderEditorEmoji() {
   $('#habitEmojiPreview').textContent = editorEmoji || habitEmoji({ name: form.elements.name.value, tab: editing?.tab || state.tab });
-  $('#emojiChoices').innerHTML = HABIT_EMOJIS.map(emoji => `<button type="button" class="emoji-picker-option" data-emoji="${emoji}" aria-label="Emoji: ${emoji}" aria-pressed="${editorEmoji === emoji}">${emoji}</button>`).join('');
+  renderEmojiBrowser('emojiChoices', editorEmoji, 'data-emoji');
 }
 
 function closeEmojiPicker() {
@@ -1159,6 +1315,7 @@ $('#habitEmojiBtn').addEventListener('click', () => {
   const open = $('#emojiPicker').hidden;
   $('#emojiPicker').hidden = !open;
   $('#habitEmojiBtn').setAttribute('aria-expanded', String(open));
+  if (open) revealEmojiSelection('emojiChoices');
 });
 $('#emojiChoices').addEventListener('click', (event) => {
   const option = event.target.closest('[data-emoji]');
@@ -1251,6 +1408,7 @@ function openEditor(habit) {
   form.elements.name.value = habit?.name ?? '';
   form.elements.detail.value = habit?.detail ?? '';
   editorEmoji = habit?.emoji || '';
+  renderEmojiBrowser('emojiChoices', editorEmoji, 'data-emoji', true);
   closeEmojiPicker();
   renderEditorEmoji();
   const g = habit?.goal;
@@ -1537,6 +1695,7 @@ const WEB_WHEEL_ITEM_H = 40;
 const firedWebTaskNotifs = new Set();
 
 function requestWebNotifPermission() {
+  if (state.preferences?.notifications === false || state.sessionLocked) return;
   if ('Notification' in window && Notification.permission === 'default') {
     Notification.requestPermission().catch(() => {});
   }
@@ -1563,6 +1722,7 @@ function getTaskDueDateObjWeb(dueStr) {
 }
 
 function checkDueTasksWeb() {
+  if (state.preferences?.notifications === false || state.sessionLocked) return;
   const nowMs = Date.now();
   for (const t of state.tasks || []) {
     if (t.done || !t.dueDate) continue;
@@ -1574,9 +1734,7 @@ function checkDueTasksWeb() {
       firedWebTaskNotifs.add(key);
       if ('Notification' in window && Notification.permission === 'granted') {
         try {
-          new Notification(`🔔 Görev Zamanı: ${t.title}`, {
-            body: t.detail ? `${t.detail} (${t.dueDate})` : `📅 ${t.dueDate} için planlanan görevinizin zamanı geldi!`,
-          });
+          new Notification(t.title);
         } catch {}
       }
     }
@@ -1643,6 +1801,7 @@ function showTaskDatePicker(open) {
   const pickV = $('#taskDatePickerView');
   if (mainV) mainV.hidden = open;
   if (pickV) pickV.hidden = !open;
+  taskEditor?.classList.toggle('date-picker-expanded', open);
   if (open) renderTaskDatePickerBody();
 }
 
@@ -1660,7 +1819,71 @@ function syncWheelActiveClasses(wheelEl, selectedVal) {
   wheelEl.querySelectorAll('.dt-wheel-item').forEach((btn) => {
     const val = Number(btn.dataset.val);
     btn.classList.toggle('active', val === selectedVal);
+    btn.setAttribute('aria-pressed', String(val === selectedVal));
   });
+}
+
+const timeWheelControls = new WeakMap();
+
+function bindTimeWheel(wheelEl, count, field) {
+  if (!wheelEl) return;
+  let userScrolling = false;
+  let touching = false;
+  let animating = false;
+  let settleTimer;
+  const currentValue = () => Math.max(0, Math.min(count * 3 - 1, Math.round(wheelEl.scrollTop / WEB_WHEEL_ITEM_H))) % count;
+  const commit = (value) => {
+    dtPickerState[field] = value;
+    syncWheelActiveClasses(wheelEl, value);
+    updateDatePickerPreviewText();
+  };
+  const center = (value) => wheelEl.scrollTo({ top: (count + value) * WEB_WHEEL_ITEM_H, behavior: 'instant' });
+  const settle = () => {
+    if (touching || !wheelEl.isConnected) return;
+    if (animating) {
+      animating = false;
+      center(dtPickerState[field]);
+      return;
+    }
+    if (!userScrolling) return;
+    const value = currentValue();
+    userScrolling = false;
+    commit(value);
+    center(value);
+  };
+  const scheduleSettle = () => {
+    clearTimeout(settleTimer);
+    settleTimer = setTimeout(settle, 160);
+  };
+  timeWheelControls.set(wheelEl, {
+    select(value) {
+      clearTimeout(settleTimer);
+      userScrolling = false;
+      touching = false;
+      commit(value);
+      // Keep the chosen value while the wheel glides to its nearest copy.
+      const target = [value, count + value, count * 2 + value].reduce((best, next) =>
+        Math.abs(next * WEB_WHEEL_ITEM_H - wheelEl.scrollTop) < Math.abs(best * WEB_WHEEL_ITEM_H - wheelEl.scrollTop) ? next : best);
+      animating = true;
+      wheelEl.scrollTo({ top: target * WEB_WHEEL_ITEM_H, behavior: 'smooth' });
+      scheduleSettle();
+    },
+  });
+  wheelEl.addEventListener('pointerdown', () => { clearTimeout(settleTimer); animating = false; touching = true; userScrolling = true; }, { passive: true });
+  const release = () => { touching = false; scheduleSettle(); };
+  wheelEl.addEventListener('pointerup', release, { passive: true });
+  wheelEl.addEventListener('pointercancel', release, { passive: true });
+  wheelEl.addEventListener('touchend', release, { passive: true });
+  wheelEl.addEventListener('touchcancel', release, { passive: true });
+  wheelEl.addEventListener('wheel', () => { animating = false; userScrolling = true; scheduleSettle(); }, { passive: true });
+  wheelEl.addEventListener('scroll', () => {
+    if (animating) { scheduleSettle(); return; }
+    if (!userScrolling || !wheelEl.isConnected) return;
+    const value = currentValue();
+    if (value !== dtPickerState[field]) commit(value);
+    if (!touching) scheduleSettle();
+  }, { passive: true });
+  center(dtPickerState[field]);
 }
 
 function renderTaskDatePickerBody() {
@@ -1681,11 +1904,13 @@ function renderTaskDatePickerBody() {
   const previewStr = `${formatTaskDueWeb(selY, selM, selD, hasTime, h, min)} (${wdName})`;
 
   let hoursHTML = '';
-  for (let i = 0; i < 24; i++) {
+  for (let index = 0; index < 24 * 3; index++) {
+    const i = index % 24;
     hoursHTML += `<button type="button" class="dt-wheel-item ${i === h ? 'active' : ''}" data-wheel-h="${i}" data-val="${i}">${pad(i)}</button>`;
   }
   let minsHTML = '';
-  for (let i = 0; i < 60; i++) {
+  for (let index = 0; index < 60 * 3; index++) {
+    const i = index % 60;
     minsHTML += `<button type="button" class="dt-wheel-item ${i === min ? 'active' : ''}" data-wheel-m="${i}" data-val="${i}">${pad(i)}</button>`;
   }
 
@@ -1703,7 +1928,7 @@ function renderTaskDatePickerBody() {
     <div class="dt-box">
       <div class="dt-time-head">
         <b style="font-size:.9rem">🕒 Saat Seçimi</b>
-        <button type="button" class="chip ${hasTime ? 'active' : ''}" data-dt-toggle-time style="border:1px solid ${hasTime ? '#767676' : '#484848'}">
+        <button type="button" class="chip ${hasTime ? 'active' : ''}" data-dt-toggle-time style="border:1px solid ${hasTime ? '#70D9FF' : '#79B8F76B'}">
           ${hasTime ? '✓ Saat Açık' : 'Saat Kapalı'}
         </button>
       </div>
@@ -1732,30 +1957,8 @@ function renderTaskDatePickerBody() {
   `;
 
   if (hasTime) {
-    const hWheel = $('#dtHourWheel');
-    const mWheel = $('#dtMinWheel');
-    if (hWheel) {
-      hWheel.scrollTop = h * WEB_WHEEL_ITEM_H;
-      hWheel.addEventListener('scroll', () => {
-        const idx = Math.max(0, Math.min(23, Math.round(hWheel.scrollTop / WEB_WHEEL_ITEM_H)));
-        if (idx !== dtPickerState.h) {
-          dtPickerState.h = idx;
-          syncWheelActiveClasses(hWheel, idx);
-          updateDatePickerPreviewText();
-        }
-      }, { passive: true });
-    }
-    if (mWheel) {
-      mWheel.scrollTop = min * WEB_WHEEL_ITEM_H;
-      mWheel.addEventListener('scroll', () => {
-        const idx = Math.max(0, Math.min(59, Math.round(mWheel.scrollTop / WEB_WHEEL_ITEM_H)));
-        if (idx !== dtPickerState.min) {
-          dtPickerState.min = idx;
-          syncWheelActiveClasses(mWheel, idx);
-          updateDatePickerPreviewText();
-        }
-      }, { passive: true });
-    }
+    bindTimeWheel($('#dtHourWheel'), 24, 'h');
+    bindTimeWheel($('#dtMinWheel'), 60, 'min');
   }
 }
 
@@ -1802,21 +2005,13 @@ $('#taskDatePickerBody')?.addEventListener('click', (e) => {
   const whBtn = e.target.closest('[data-wheel-h]');
   if (whBtn) {
     const val = Number(whBtn.dataset.wheelH);
-    dtPickerState.h = val;
-    const hWheel = $('#dtHourWheel');
-    if (hWheel) hWheel.scrollTo({ top: val * WEB_WHEEL_ITEM_H, behavior: 'smooth' });
-    syncWheelActiveClasses(hWheel, val);
-    updateDatePickerPreviewText();
+    timeWheelControls.get($('#dtHourWheel'))?.select(val);
     return;
   }
   const wmBtn = e.target.closest('[data-wheel-m]');
   if (wmBtn) {
     const val = Number(wmBtn.dataset.wheelM);
-    dtPickerState.min = val;
-    const mWheel = $('#dtMinWheel');
-    if (mWheel) mWheel.scrollTo({ top: val * WEB_WHEEL_ITEM_H, behavior: 'smooth' });
-    syncWheelActiveClasses(mWheel, val);
-    updateDatePickerPreviewText();
+    timeWheelControls.get($('#dtMinWheel'))?.select(val);
   }
 });
 
@@ -1973,7 +2168,9 @@ $('#importFile').addEventListener('change', async (e) => {
       deletedTabs: Array.isArray(s.deletedTabs) ? s.deletedTabs.filter(id => TABS.some(tab => tab.id === id)) : [],
       tabEdits: s.tabEdits && typeof s.tabEdits === 'object' ? s.tabEdits : {},
       tab: [...TABS, ...importedCustomTabs].some((t) => t.id === s.tab) ? s.tab : TABS[0].id,
+      preferences: s.preferences || state.preferences,
       profile: {
+        ...s.profile,
         firstName: typeof s.profile?.firstName === 'string' ? s.profile.firstName : (state.profile?.firstName || ''),
         lastName: typeof s.profile?.lastName === 'string' ? s.profile.lastName : (state.profile?.lastName || ''),
         lastBackupAt: s.profile?.lastBackupAt || state.profile?.lastBackupAt,

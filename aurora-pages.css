@@ -1,0 +1,136 @@
+/* Profile and creation panels share the application's blue glass controls. */
+body.aurora-app { --ui-blue:#008eff; --ui-cyan:#70d9ff; --ui-border:#78c9ff66; --ui-field:#071d4299; }
+.aurora-app .editor, .aurora-app .profile-page, body.aurora-app[data-section="gorevler"] {
+  --accent:#008eff; --accent-end:#005bdb; --accent-ink:#fff; --accent-soft:#008eff30;
+}
+.aurora-app .add-tab-btn {
+  color:#70e4ff; border-color:#66ceff99;
+  background:linear-gradient(145deg,#278aff29,#0750a640);
+  box-shadow:inset 0 1px #d5f6ff30;
+}
+.aurora-app .aurora-categories .tabs { scroll-padding-inline:5px; }
+.aurora-app .aurora-categories .tab { flex-shrink:0; }
+.aurora-app .aurora-categories .tab>span:nth-child(2) { max-width:none; flex-shrink:0; }
+.reference-day-touch.current:not(.mark-r) .reference-day-circle {
+  color:#fff; border-color:#27d9ff;
+  background:radial-gradient(ellipse at 30% 10%,#b9f5ff70,transparent 65%),linear-gradient(145deg,#008eff,#0042ff);
+  box-shadow:inset 0 1px #b8f6ff80,inset 0 0 6px #00d9ff55,0 0 10px #007aff85;
+}
+.reference-month .reference-day-touch.current .reference-day-circle { outline-color:#27d9ff; }
+.reference-day-touch.mark-g:not(.current) .reference-day-circle {
+  color:#fff; border-color:#8fe6b4a8;
+  background:radial-gradient(ellipse at 30% 14%,#c3ffd568,transparent 63%),linear-gradient(135deg,#14af6f,#00865a);
+  box-shadow:inset 0 1px #e3ffdaa1,inset 0 0 6px #a7ffd74d,0 0 10px #00e99040;
+}
+.reference-card-info .reference-counter { width:max-content; margin-top:4px; gap:5px; }
+.reference-card-info .reference-counter>.reference-amount { max-width:100px; overflow:hidden; text-overflow:ellipsis; }
+.reference-quantity-track { height:8px; margin-top:10px; }
+.reference-streak { width:52px; height:25px; margin-right:26px; font-size:10.5px; padding:4px 6px; }
+.reference-card-actions { flex-shrink:0; }
+
+.aurora-app .profile-page { padding-top:12px; gap:20px; }
+.aurora-app .profile-page-heading { display:grid; grid-template-columns:1fr auto 1fr; }
+.aurora-app .profile-page-heading h2 { font-size:21px; letter-spacing:-.4px; }
+.aurora-app .profile-page-heading .pill {
+  justify-self:start; color:#d8f4ff; border-color:#70bdff70; background:#164b8e40; border-radius:18px;
+}
+.aurora-app .profile-eyebrow { justify-self:end; }
+.aurora-app .profile-hero {
+  padding:28px 18px 22px; border-color:#8cd4ff70; border-radius:25px;
+  background:radial-gradient(ellipse at 100% 100%,#064bdf24,transparent 65%),linear-gradient(125deg,#c5eaff12,transparent 60%),#0d23539e;
+  box-shadow:inset 0 1px #d9f6ff20,0 12px 32px #02091c38;
+}
+.aurora-app .profile-hero .profile-avatar-lg {
+  width:82px; height:82px; border-radius:50%; border:1.5px solid #8ad8ff; color:#f4fbff;
+  background:radial-gradient(ellipse at 25% 10%,#b4e8ff55,transparent 65%),linear-gradient(145deg,#248dff,#0752b5);
+  box-shadow:inset 0 1px #d8f8ff45,0 0 20px #008eff35;
+}
+.aurora-app .profile-hero .photo-camera { color:#d7f4ff; background:#0b3472; border-color:#8ad8ff9c; }
+.aurora-app .profile-hero .photo-camera>svg { width:14px; height:14px; }
+.aurora-app .profile-hero .profile-avatar-lg>svg { width:34px; height:34px; }
+.aurora-app .profile-hero h3 { margin-top:18px; font-size:25px; line-height:32px; }
+.aurora-app .profile-subtitle { overflow-wrap:anywhere; color:#9db9e7; font-size:14px; }
+.aurora-app .profile-stats-grid { gap:8px; margin-top:22px; }
+.aurora-app .profile-stat-box {
+  min-width:0; padding:16px 5px; border:1px solid #78b9f738; border-radius:18px;
+  background:linear-gradient(145deg,#86c9ff12,#0758a81c); box-shadow:inset 0 1px #d4edff13;
+}
+.aurora-app .profile-stat-box b { color:#e6f7ff; font-size:21px; }
+.aurora-app .profile-stat-box:nth-child(2) b { color:#70dfff; }
+.aurora-app .profile-stat-box small { font-size:10px; line-height:15px; color:#9db9e7; }
+
+.aurora-app .editor {
+  color:var(--text); border:1px solid var(--ui-border); border-top-color:#a3deff9c;
+  border-radius:27px 27px 0 0;
+  background:radial-gradient(ellipse at 100% 100%,#075cff20,transparent 65%),linear-gradient(125deg,#c5eaff12,transparent 65%),#0a1e44ed;
+  backdrop-filter:blur(22px) saturate(135%); -webkit-backdrop-filter:blur(22px) saturate(135%);
+  box-shadow:inset 0 1px #d5f5ff20,0 -12px 48px #020a2466;
+}
+.aurora-app .editor h2 { font-size:22px; line-height:29px; letter-spacing:-.4px; }
+.aurora-app .editor label, .aurora-app .editor .field-label { color:var(--text); font-size:13px; }
+.aurora-app .editor .opt, .aurora-app .editor .category-local-note { color:var(--muted); }
+.aurora-app .editor input:not([type="checkbox"]):not([type="hidden"]), .aurora-app .editor textarea {
+  min-width:0; color:var(--text); border:1px solid #79b8f76b; border-radius:15px;
+  background:var(--ui-field); box-shadow:inset 0 1px #d4edff10; caret-color:#70d9ff;
+}
+.aurora-app .editor input::placeholder, .aurora-app .editor textarea::placeholder { color:#91b3df; opacity:1; }
+.aurora-app .editor input:focus, .aurora-app .editor textarea:focus { border-color:#70d9ff; outline:none; box-shadow:0 0 0 2px #008eff20; }
+.aurora-app .editor .primary, .aurora-app .editor .category-create-btn,
+.aurora-app .task-toolbar .primary, .aurora-app .task-quick-bar .primary {
+  color:#fff; border:1px solid #66d5ff99; border-radius:17px;
+  background:radial-gradient(ellipse at 20% 0%,#b6ebff48,transparent 65%),linear-gradient(135deg,#008eff,#005bdb);
+  box-shadow:inset 0 1px #e4faff44,0 0 14px #005bff24;
+}
+.aurora-app .editor .primary:disabled { opacity:.45; }
+.aurora-app .editor .ghost, .aurora-app .editor .chip, .aurora-app .editor .goal-type-btn {
+  color:var(--text); border:1px solid #79b8f76b; background:#0b3a794a; border-radius:16px;
+}
+.aurora-app .editor .goal-type-btn { min-height:44px; }
+.aurora-app .editor .goal-type-btn.active, .aurora-app .editor .chip.active {
+  color:#fff; border-color:#66d5ff99; background:linear-gradient(135deg,#008eff,#005bdb);
+}
+.aurora-app .editor .emoji-picker-trigger { color:#70d9ff; border-color:#70d9ff80; background:#008eff26; }
+#categoryEditor .emoji-picker-trigger, #categoryEditor #categoryName { border-color:#70d9ff80; background:var(--ui-field); }
+#categoryEditor .emoji-picker-trigger { color:#70d9ff; }
+#categoryEditor .emoji-browser { --accent:#70d9ff; --accent-soft:#008eff26; }
+.aurora-app .editor .goal-config-box, .aurora-app .editor .subtask-item {
+  border-color:#79b8f745; background:#0b255655; border-radius:14px;
+}
+.aurora-app .editor .editor-actions { border-color:#78c9ff45; }
+.aurora-app .task-sheet-actions { border-color:#78c9ff45; background:transparent; }
+.aurora-app .editor .dt-select-btn, .aurora-app .editor .dt-box, .aurora-app .editor .dt-wheel-box {
+  color:var(--text); border:1px solid #79b8f76b; background:var(--ui-field); border-radius:15px;
+}
+.aurora-app .dt-select-text.muted, .aurora-app .dt-weekdays, .aurora-app .dt-wheel-col small { color:#9db9e7; }
+.aurora-app .dt-action-badge, .aurora-app .dt-clear-btn, .aurora-app .dt-cal-nav {
+  color:#d8f5ff; border:1px solid #79b8f76b; background:#0b3a7970;
+}
+.aurora-app .dt-day-btn { color:var(--text); }
+.aurora-app .dt-day-btn.today { border-color:#66d5ff80; }
+.aurora-app .dt-day-btn.selected { color:#fff; border-color:#70d9ff; background:linear-gradient(135deg,#008eff,#005bdb); }
+.aurora-app .dt-wheel-highlight { background:#008eff35; border-color:#70d9ff85; }
+.aurora-app .dt-wheel-item { color:#8aa9d9; }
+.aurora-app .dt-wheel-item.active { color:#effaff; }
+.aurora-app .dt-wheel-colon { color:#70d9ff; }
+.aurora-app .dt-preview-banner { color:#d8f5ff; border-color:#79b8f76b; background:#0750a640; }
+.aurora-app .task-toolbar { gap:7px; margin-top:15px; }
+.aurora-app .task-toolbar button { min-height:38px; padding:9px 12px; font-size:12px; }
+.aurora-app .task-toolbar .pill { color:#d7edff; border-color:#79b8f76b; background:#0b3a794a; border-radius:17px; }
+.aurora-app .task-quick-bar { align-items:center; border-color:#79b8f76b; border-radius:23px; }
+.aurora-app .task-quick-bar input { color:var(--text); background:transparent; }
+.aurora-app .task-quick-bar .task-circle { color:#70d9ff!important; border-color:#70d9ff80; }
+.aurora-app .task-circle, .aurora-app .task-sub-circle { border-color:#70bfff80; }
+.aurora-app .task-circle.done, .aurora-app .task-sub-circle.done { color:#fff; border-color:#66d5ff; background:#087dce; }
+.aurora-app[data-section="gorevler"] .empty { border-color:#79b8f75c; background:#0b25564a; border-style:solid; border-radius:23px; line-height:1.8; }
+.aurora-app[data-section="gorevler"] [data-task-item] .goal-chip { display:inline-flex; }
+
+.aurora-app[data-appearance="light"] { --ui-field:#e5f2ffb3; }
+.aurora-app[data-appearance="light"] .editor, .aurora-app[data-appearance="light"] .profile-hero { background:linear-gradient(125deg,#fff9,#e4f3ffbb),#edf6fff2; }
+.aurora-app[data-appearance="light"] .profile-page-heading .pill, .aurora-app[data-appearance="light"] .editor .ghost,
+.aurora-app[data-appearance="light"] .editor .chip, .aurora-app[data-appearance="light"] .editor .goal-type-btn,
+.aurora-app[data-appearance="light"] .task-toolbar .pill { color:var(--text); background:#d6eaff85; }
+.aurora-app[data-appearance="light"] .editor .goal-type-btn.active, .aurora-app[data-appearance="light"] .editor .chip.active { color:#fff; background:linear-gradient(135deg,#008eff,#005bdb); }
+.aurora-app[data-appearance="light"] .profile-stat-box b { color:#153f74; }
+.aurora-app[data-appearance="light"] .profile-stat-box:nth-child(2) b { color:#0878c7; }
+.aurora-app[data-appearance="light"] .profile-stat-box small, .aurora-app[data-appearance="light"] .profile-subtitle { color:#4c709a; }
+.aurora-app[data-appearance="light"] .dt-wheel-item.active { color:#153f74; }

@@ -80,10 +80,10 @@ export function calculateStreaks(
   const m = habitMarks || {};
   let cur = 0;
   let d = parseKey(todayKey);
-  if (m[todayKey] !== 'g') {
+  if (!m[todayKey]) {
     d = addDays(d, -1); // Bugün henüz işaretlenmediyse zincir bozulmaz
   }
-  while (m[keyOf(d)] === 'g') {
+  while (m[todayKey] !== 'b' && m[todayKey] !== 'r' && m[keyOf(d)] === 'g') {
     cur++;
     d = addDays(d, -1);
   }
@@ -91,7 +91,7 @@ export function calculateStreaks(
   let best = 0;
   let run = 0;
   const keys = Object.keys(m)
-    .filter((k) => m[k] === 'g')
+    .filter((k) => k <= todayKey && m[k] === 'g')
     .sort();
   if (keys.length > 0) {
     let prev: string | null = null;

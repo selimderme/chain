@@ -14,6 +14,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
 import * as Haptics from 'expo-haptics';
 import { AuthUser } from './constants';
+import { NeonBackdrop } from './NeonDesign';
 import Svg, { Circle, Path } from 'react-native-svg';
 import {
   continueAsGuestUser,
@@ -181,6 +182,7 @@ export default function AuthScreen({
   return (
     <SafeAreaView style={styles.safeArea} edges={['top', 'bottom', 'left', 'right']}>
       <StatusBar style="light" />
+      <NeonBackdrop/>
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
         <ScrollView ref={scrollRef} contentContainerStyle={styles.scrollContent} keyboardShouldPersistTaps="handled" showsVerticalScrollIndicator={false}>
           <View style={styles.content}>
@@ -285,15 +287,15 @@ function ProviderIcon({ provider }: { provider: 'google' | 'apple' }) {
 
 const styles = StyleSheet.create({
   flex: { flex: 1 },
-  safeArea: { flex: 1, backgroundColor: '#05070B' },
+  safeArea: { flex: 1, backgroundColor: '#080F29' },
   scrollContent: { flexGrow: 1, paddingHorizontal: 24, paddingTop: 10, paddingBottom: 28 },
   content: { width: '100%', maxWidth: 440, alignSelf: 'center' },
   nav: { height: 52, justifyContent: 'center' },
-  back: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: '#101A2A' },
+  back: { width: 36, height: 36, borderRadius: 18, alignItems: 'center', justifyContent: 'center', backgroundColor: '#182A50' },
   title: { color: '#F1F2F6', fontSize: 25, lineHeight: 32, fontWeight: '700', marginTop: 20, marginBottom: 28 },
   nameRow: { flexDirection: 'row', gap: 12 },
-  field: { minHeight: 64, backgroundColor: '#0C1424', borderWidth: 1, borderColor: '#253753', borderRadius: 12, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 8, marginBottom: 16 },
-  fieldFocused: { borderColor: '#5478AF', backgroundColor: '#101D33' },
+  field: { minHeight: 64, backgroundColor: 'rgba(25,43,82,0.78)', borderWidth: 1, borderColor: '#97B7FF4D', borderRadius: 12, paddingHorizontal: 14, paddingTop: 10, paddingBottom: 8, marginBottom: 16 },
+  fieldFocused: { borderColor: '#66D9FF', backgroundColor: '#1B305C' },
   label: { color: '#B3B8C5', fontSize: 10, lineHeight: 15, letterSpacing: 0.6 },
   input: { minWidth: 0, color: '#F0F1F6', fontSize: 16, lineHeight: 23, padding: 0, paddingTop: 5, paddingBottom: 1, borderWidth: 0, backgroundColor: 'transparent', ...Platform.select({ web: { outlineStyle: 'solid' as const, outlineWidth: 0, outlineColor: 'transparent' } }) },
   passwordRow: { flexDirection: 'row', alignItems: 'center' },
@@ -311,7 +313,7 @@ const styles = StyleSheet.create({
   accountRow: { flexDirection: 'row', flexWrap: 'wrap', justifyContent: 'center', alignItems: 'center', marginTop: 26, columnGap: 6 },
   secondaryText: { color: '#AEB4C4', fontSize: 12, lineHeight: 18, textAlign: 'center' },
   textLink: { minHeight: 36, justifyContent: 'center' },
-  linkText: { color: '#86ABDF', fontWeight: '600', fontSize: 12 },
+  linkText: { color: '#66D9FF', fontWeight: '600', fontSize: 12 },
   guest: { alignSelf: 'center', paddingHorizontal: 12, paddingVertical: 10, marginTop: 2 },
   error: { padding: 12, backgroundColor: '#39242D', borderRadius: 10, marginBottom: 16 },
   errorText: { color: '#FFB4C4', fontSize: 13, lineHeight: 19 },

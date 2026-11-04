@@ -115,9 +115,9 @@ function sanitizeRestoredState(
   }
 
   const firstName =
-    parsed.profile?.firstName || user.firstName || '';
+    parsed.profile?.deleted ? '' : parsed.profile?.firstName || user.firstName || '';
   const lastName =
-    parsed.profile?.lastName || user.lastName || '';
+    parsed.profile?.deleted ? '' : parsed.profile?.lastName || user.lastName || '';
 
   return {
     v: 1,
@@ -136,6 +136,9 @@ function sanitizeRestoredState(
         : {},
     tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
     profile: {
+      avatar: parsed.profile?.avatar,
+      photoUri: parsed.profile?.photoUri,
+      deleted: parsed.profile?.deleted,
       firstName,
       lastName,
       email: user.email,
@@ -158,8 +161,8 @@ export function cloudPayload(user: AuthUser, state: AppDataState): AppDataState 
     marks: Object.fromEntries(Object.entries(state.marks).filter(([id]) => ids.has(id))),
     progress: Object.fromEntries(Object.entries(state.progress || {}).filter(([id]) => ids.has(id))),
     tasks: state.tasks || [],
-    profile: { ...state.profile, firstName: state.profile?.firstName || user.firstName || '',
-      lastName: state.profile?.lastName || user.lastName || '', email: user.email, authProvider: user.provider },
+    profile: { ...state.profile, firstName: state.profile?.deleted ? '' : state.profile?.firstName || user.firstName || '',
+      lastName: state.profile?.deleted ? '' : state.profile?.lastName || user.lastName || '', email: user.email, authProvider: user.provider },
   };
 }
 

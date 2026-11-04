@@ -5,6 +5,8 @@ import { StyleSheet } from 'react-native';
 type BlurTarget = React.ComponentRef<typeof BlurTargetView>;
 const BlurTargetContext = createContext<React.RefObject<BlurTarget | null> | undefined>(undefined);
 
+export const useBlurTarget = () => useContext(BlurTargetContext);
+
 /** Keep one capture target for all sheets, including Android's native blur. */
 export function SheetHost({ children }: { children: React.ReactNode }) {
   const target = useRef<BlurTarget>(null);

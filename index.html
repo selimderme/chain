@@ -4,14 +4,19 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Günlük Rutin</title>
-  <meta name="theme-color" content="#080908">
+  <meta name="theme-color" content="#030C27">
+  <link rel="preload" as="image" href="assets/aurora-atmosphere.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Roboto:ital,wght@0,300;0,400;0,500;0,700;1,400&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="style.css">
   <link rel="stylesheet" href="neon.css">
+  <link rel="stylesheet" href="aurora-system.css">
+  <link rel="stylesheet" href="aurora-pages.css">
+  <link rel="stylesheet" href="discover.css">
 </head>
-<body data-tab="beslenme">
+<body data-tab="beslenme" data-backdrop-ready="false">
+  <div class="startup-loading" role="status" aria-label="Uygulama hazırlanıyor"><span></span></div>
   <div class="neon-backdrop" aria-hidden="true"><i class="gold-ribbon ribbon-top"></i><i class="gold-ribbon ribbon-bottom"></i><i class="gold-orb"></i></div>
   <header class="topbar">
     <div class="topbar-head">
@@ -80,9 +85,11 @@
         <button type="button" id="categoryEmojiBtn" class="emoji-picker-trigger" aria-label="Sekme emojisi seç" aria-controls="categoryEmojiChoices" aria-expanded="false"><span id="categoryEmojiPreview" aria-hidden="true">📁</span><small aria-hidden="true">▾</small></button>
         <input id="categoryName" name="name" aria-label="Sekme adı" maxlength="40" autocomplete="off" placeholder="Örn. İş, Hobiler, Finans">
       </div>
-      <div id="categoryEmojiChoices" class="emoji-picker-grid category-emoji-choices" hidden></div>
-      <span class="field-label">Tema rengi</span>
-      <div id="categoryColors" class="category-color-grid"></div>
+      <div id="categoryEmojiChoices" class="emoji-browser category-emoji-choices" hidden></div>
+      <div id="categoryColorField" hidden>
+        <span class="field-label">Tema rengi</span>
+        <div id="categoryColors" class="category-color-grid"></div>
+      </div>
       <p id="categoryError" class="category-error" role="alert" hidden></p>
       <div class="editor-actions">
         <span class="spacer"></span>
@@ -103,7 +110,7 @@
       </div>
       <div id="emojiPicker" class="emoji-picker-panel" hidden>
         <div class="emoji-picker-header"><span>Emoji seç</span><button type="button" id="autoEmojiBtn" aria-label="Otomatik emoji kullan">Otomatik</button></div>
-        <div id="emojiChoices" class="emoji-picker-grid"></div>
+        <div id="emojiChoices" class="emoji-browser"></div>
       </div>
       <label>Hedef / not <span class="opt">(isteğe bağlı)</span>
         <input name="detail" maxlength="80" autocomplete="off" placeholder="Örn. Sabah & akşam, 3×12 tekrar">
@@ -203,6 +210,7 @@
   <dialog id="taskEditor" class="editor task-editor-dialog" aria-labelledby="taskEditorTitle">
     <form id="taskEditorForm" method="dialog">
       <div id="taskEditorMainView">
+        <div class="task-sheet-content">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;gap:10px">
           <h2 id="taskEditorTitle" style="margin:0">Yeni görev</h2>
           <button type="button" id="taskStarToggleBtn" class="chip">☆ Yıldızla</button>
@@ -233,7 +241,8 @@
             <button type="button" id="addTaskSubtaskBtn" class="primary">＋ Ekle</button>
           </div>
         </div>
-        <div class="editor-actions">
+        </div>
+        <div class="editor-actions task-sheet-actions">
           <button type="button" id="deleteTaskBtn" class="danger" hidden>Sil</button>
           <span class="spacer"></span>
           <button type="button" id="cancelTaskBtn" class="ghost">Vazgeç</button>
@@ -246,8 +255,8 @@
           <button type="button" id="closeDatePickerBackBtn" class="ghost" style="padding:4px 10px">‹ Geri</button>
           <h2 style="margin:0;font-size:1.1rem">Tarih ve Saat Seç</h2>
         </div>
-        <div id="taskDatePickerBody"></div>
-        <div class="editor-actions">
+        <div id="taskDatePickerBody" class="task-sheet-content"></div>
+        <div class="editor-actions task-sheet-actions">
           <button type="button" id="clearDatePickerBtn" class="danger">Temizle</button>
           <span class="spacer"></span>
           <button type="button" id="cancelDatePickerBtn" class="ghost">Vazgeç</button>
@@ -257,6 +266,11 @@
     </form>
   </dialog>
 
+  <script src="backdrop-ready.js"></script>
   <script src="app.js"></script>
+  <script src="profile-web.js"></script>
+  <script src="discover-catalog.js"></script>
+  <script src="discover-web.js"></script>
+  <script src="aurora-system.js"></script>
 </body>
 </html>

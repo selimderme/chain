@@ -86,7 +86,7 @@ function rowFixture(options = {}) {
     calls, controls, renderList: props => module.exports.SpringDragList(props),
     start: () => controls.longPressDragProps.onStartShouldSetPanResponderCapture({ nativeEvent: { pageX: 0, pageY: 0 } }),
     advance: () => { const pending = [...timers.values()]; timers.clear(); pending.forEach(fn => fn()); },
-    dispatch: name => [...(listeners.get(name) || [])].forEach(fn => fn()),
+    dispatch: (name, event) => [...(listeners.get(name) || [])].forEach(fn => fn(event)),
     dispose: () => cleanups.forEach(fn => fn?.()),
   };
 }
@@ -161,5 +161,38 @@ test('a scroll movement cancels long press while the drag handle remains immedia
   assert.deepEqual(f.calls.end, []);
   f.controls.handleProps.onPanResponderRelease();
   assert.deepEqual(f.calls.end, [false]);
+  f.dispose();
+});
+
+test('held vertical habit cards follow vertical movement and consume the release tap', () => {
+  const f = rowFixture({holdDelay:450});
+  f.start(); f.advance();
+  f.controls.longPressDragProps.onPanResponderMove(null,{dx:2,dy:180});
+  assert.deepEqual(f.calls.moves,[180]);
+  f.controls.longPressDragProps.onTouchEnd();
+  assert.deepEqual(f.calls.end,[false]);
+  assert.equal(f.controls.consumeLongPress(),true);
+  f.dispose();
+});
+
+test('removing a dragged row cancels the active gesture and releases its scroll lock', () => {
+  for (const handle of [false,true]) {
+    const f=rowFixture();
+    if(handle)f.controls.handleProps.onPanResponderGrant();
+    else {f.start();f.advance();}
+    f.dispose();
+    assert.deepEqual(f.calls.end,[true]);
+  }
+});
+
+test('web touch scrolling is blocked only after a hold activates and released afterward', () => {
+  const f=rowFixture();let prevented=0;
+  const event={preventDefault(){prevented++;}};
+  f.start();f.dispatch('touchmove',event);
+  assert.equal(prevented,0);
+  f.advance();f.dispatch('touchmove',event);
+  assert.equal(prevented,1);
+  f.dispatch('pointerup');f.dispatch('touchmove',event);
+  assert.equal(prevented,1);
   f.dispose();
 });

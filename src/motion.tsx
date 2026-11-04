@@ -1181,9 +1181,10 @@ type SheetPressableProps = Omit<PressableProps, 'style' | 'children'> & {
   style?: StyleProp<ViewStyle>;
   children?: React.ReactNode;
   onDismiss?: () => void;
+  expanded?: boolean;
 };
 
-export function SheetPressable({ style, children, onDismiss, onLayout, ...rest }: SheetPressableProps) {
+export function SheetPressable({ style, children, onDismiss, onLayout, expanded = false, ...rest }: SheetPressableProps) {
   const insets = useSafeAreaInsets();
   const v = useRef(new Animated.Value(reduceMotion ? 1 : 0)).current;
   const dragY = useRef(new Animated.Value(0)).current;
@@ -1245,10 +1246,10 @@ export function SheetPressable({ style, children, onDismiss, onLayout, ...rest }
       style={[
         style,
         {
-          width: '100%', maxWidth: 760, maxHeight: '85%', flexShrink: 1,
+          width: '100%', maxWidth: 760, maxHeight: expanded ? '98%' : '85%', flexShrink: 1,
           borderTopLeftRadius: 26, borderTopRightRadius: 26,
           borderBottomLeftRadius: 0, borderBottomRightRadius: 0,
-          paddingTop: 30, paddingBottom: Math.max(insets.bottom + 16, 24),
+          paddingTop: expanded ? 24 : 30, paddingBottom: Math.max(insets.bottom + (expanded ? 8 : 16), expanded ? 16 : 24),
           overflow: 'hidden',
         },
         {
@@ -1284,7 +1285,7 @@ export function SheetPressable({ style, children, onDismiss, onLayout, ...rest }
         accessibilityLabel={onDismiss ? 'Paneli kapat; aşağı sürükleyebilirsin' : undefined}
         accessible={!!onDismiss}
         onAccessibilityTap={onDismiss ? dismiss : undefined}
-        style={{ position: 'absolute', top: 0, left: 0, right: 0, height: 30, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { touchAction: 'none', cursor: 'grab', userSelect: 'none' } as unknown as ViewStyle : {}) }}
+        style={{ position: 'absolute', zIndex: 2, top: 0, left: 0, right: 0, height: 30, alignItems: 'center', justifyContent: 'center', ...(Platform.OS === 'web' ? { touchAction: 'none', cursor: 'grab', userSelect: 'none' } as unknown as ViewStyle : {}) }}
       >
         <View pointerEvents="none" style={{ width: 40, height: 4, borderRadius: 99, backgroundColor: 'rgba(255,255,255,0.3)' }} />
       </View>
@@ -3356,7 +3357,8 @@ export function SpringDragList<T>({
   style,
   renderItem,
 }: SpringDragListProps<T>) {
-  // Her öğe için Native Driver destekli Animated.Value havuzu (sürükleme başlangıcı ve boyunca 0 React re-render!)
+  // Motion stays in Animated values; React only updates when the lifted row changes.
+  const [draggedKey, setDraggedKey] = useState<string | null>(null);
   const translateYMapRef = useRef<Map<string, Animated.Value>>(new Map());
   const liftMapRef = useRef<Map<string, Animated.Value>>(new Map());
   const lastShiftMapRef = useRef<Map<string, number>>(new Map());
@@ -3410,6 +3412,7 @@ export function SpringDragList<T>({
   };
 
   const setRowElevated = (key: string, elevated: boolean) => {
+    setDraggedKey(previous => elevated ? key : previous === key ? null : previous);
     const node = rowRefsMapRef.current.get(key) as any;
     if (node && typeof node.setNativeProps === 'function') {
       node.setNativeProps({
@@ -3610,6 +3613,7 @@ export function SpringDragList<T>({
           <SpringDragRowWrapper
             key={key}
             itemKey={key}
+            elevated={draggedKey === key}
             index={idx}
             axis={axis}
             holdDelay={holdDelay}
@@ -3635,6 +3639,7 @@ export function SpringDragList<T>({
 }
 
 interface SpringDragRowWrapperProps {
+  elevated?: boolean;
   axis?: 'vertical' | 'horizontal';
   holdDelay?: number;
   itemKey: string;
@@ -3655,6 +3660,7 @@ function SpringDragRowWrapper({
   axis = 'vertical',
   holdDelay = 170,
   itemKey,
+  elevated = false,
   index,
   translateY,
   lift,
@@ -3710,18 +3716,29 @@ function SpringDragRowWrapper({
     // Mouse releases do not emit touchend. Never leave a drag timer armed after a click.
     const release = () => finishHold(false);
     const cancel = () => finishHold(true);
+    const preventScroll = (event: Event) => {
+      if (armedByHoldRef.current || handleActiveRef.current) event.preventDefault();
+    };
     window.addEventListener('pointerup', release, true);
     window.addEventListener('pointercancel', cancel, true);
     window.addEventListener('blur', cancel);
+    window.addEventListener('touchmove', preventScroll, {passive:false,capture:true});
     return () => {
       window.removeEventListener('pointerup', release, true);
       window.removeEventListener('pointercancel', cancel, true);
       window.removeEventListener('blur', cancel);
+      window.removeEventListener('touchmove', preventScroll, true);
     };
   }, []);
 
   useEffect(() => {
-    return () => clearHoldTimer();
+    return () => {
+      finishHold(true);
+      if (handleActiveRef.current) {
+        handleActiveRef.current = false;
+        cbRef.current.onEndDrag(true);
+      }
+    };
   }, []);
 
   // 1) `⠿` Tutamacı (veya Sırala modu kartı) için 0ms gecikmesiz başlayan PanResponder
@@ -3871,8 +3888,8 @@ function SpringDragRowWrapper({
       ref={(node) => onRegisterRowRef(itemKey, node as any)}
       onLayout={(e) => onMeasureHeight(axis === 'horizontal' ? e.nativeEvent.layout.width : e.nativeEvent.layout.height)}
       style={{
-        zIndex: 1,
-        elevation: 0,
+        zIndex: elevated ? 100 : 1,
+        elevation: elevated ? 16 : 0,
         transform: [axis === 'horizontal' ? { translateX: translateY } : { translateY }, { scale }],
       }}
     >
