@@ -9,6 +9,10 @@ jobs:
   build-ios:
     name: Build Unsigned iOS (.ipa)
     runs-on: macos-latest
+    env:
+      CI: "1"
+      # Compile Expo modules together to avoid incompatible prebuilt Swift symbols.
+      EXPO_USE_PRECOMPILED_MODULES: "0"
 
     steps:
       - name: Repo dosyalarını çek
@@ -20,10 +24,16 @@ jobs:
           node-version: 20
 
       - name: Bağımlılıkları yükle
-        run: npm install --legacy-peer-deps
+        run: npm ci --legacy-peer-deps
 
       - name: Native iOS (Xcode) projesini oluştur (Expo Prebuild)
-        run: npx expo prebuild --platform ios --no-install
+        run: |
+          npx expo prebuild --platform ios --no-install --clean
+          for f in ios/*/*.entitlements; do
+            if [ -f "$f" ]; then
+              /usr/libexec/PlistBuddy -c "Delete :aps-environment" "$f" 2>/dev/null || true
+            fi
+          done
 
       - name: CocoaPods bağımlılıklarını yükle
         working-directory: ios
@@ -43,7 +53,8 @@ jobs:
             CODE_SIGN_IDENTITY="" \
             CODE_SIGNING_REQUIRED=NO \
             CODE_SIGNING_ALLOWED=NO \
-             clean build
+            DEVELOPMENT_TEAM="" \
+            clean build
 
       - name: .app çıktısını .ipa dosyasına dönüştür
         run: |
