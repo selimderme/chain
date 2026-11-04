@@ -3,6 +3,13 @@
   "version": "1.0.0",
   "private": true,
   "main": "index.js",
+  "expo": {
+    "autolinking": {
+      "ios": {
+        "buildFromSource": [".*"]
+      }
+    }
+  },
   "scripts": {
     "test": "node --test tests/*.test.cjs",
     "start": "expo start",
